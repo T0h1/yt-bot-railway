@@ -50,6 +50,18 @@ TELEGRAM_MAX_FILE = 49 * 1024 * 1024  # ~50MB Telegram limit
 # Railway-friendly limits
 MAX_STORAGE_MB = int(os.getenv("MAX_STORAGE_MB", "400"))  # Railway free tier: 512MB
 
+# Railway-specific video limits (reduced for smaller files)
+RAILWAY_MODE = os.getenv("RAILWAY_MODE", "false").lower() == "true"
+if RAILWAY_MODE:
+    # On Railway, use more aggressive compression and lower quality defaults
+    VIDEO_COMPRESSION_TARGET_MB = int(os.getenv("VIDEO_COMPRESSION_TARGET_MB", "20"))  # 20MB target
+    MAX_VIDEO_DURATION_SEC = int(os.getenv("MAX_VIDEO_DURATION_SEC", "300"))  # 5 min max
+    DEFAULT_VIDEO_QUALITY = "480p"  # Default to 480p on Railway
+else:
+    VIDEO_COMPRESSION_TARGET_MB = 48
+    MAX_VIDEO_DURATION_SEC = 0  # No limit
+    DEFAULT_VIDEO_QUALITY = "best"
+
 # ==================== DATABASE ====================
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -808,6 +820,11 @@ def compress_video(input_path, output_path, target_size_mb=48):
 
 async def download_video(url, chat_id, context, quality='best'):
     resolved = resolve_short_url(url)
+    
+    # Use Railway-aware default quality if not explicitly specified
+    if quality == 'best' and RAILWAY_MODE:
+        quality = DEFAULT_VIDEO_QUALITY
+    
     format_map = {
         'best': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
         '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]',
@@ -843,6 +860,14 @@ async def download_video(url, chat_id, context, quality='best'):
             await status_msg.edit_text("❌ فایل ویدئو یافت نشد")
             return
 
+        # Check duration limit (Railway mode)
+        duration = info.get('duration', 0)
+        if MAX_VIDEO_DURATION_SEC > 0 and duration > MAX_VIDEO_DURATION_SEC:
+            temp_file.unlink()
+            mins = MAX_VIDEO_DURATION_SEC // 60
+            await status_msg.edit_text(f"❌ ویدئو خیلی طولانیه ({duration//60}:{duration%60:02d})\n💡 حداکثر {mins} دقیقه در حالت Railway")
+            return
+
         file_size = temp_file.stat().st_size
         
         # If video is too large, try to compress it
@@ -851,9 +876,9 @@ async def download_video(url, chat_id, context, quality='best'):
             
             compressed_file = DOWNLOAD_DIR / "temp_video_compressed.mp4"
             
-            # Try compression
+            # Try compression with Railway-aware target
             success = await asyncio.get_event_loop().run_in_executor(
-                None, compress_video, temp_file, compressed_file, 48
+                None, compress_video, temp_file, compressed_file, VIDEO_COMPRESSION_TARGET_MB
             )
             
             if success and compressed_file.exists() and compressed_file.stat().st_size <= TELEGRAM_MAX_FILE:
