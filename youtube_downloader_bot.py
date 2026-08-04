@@ -36,8 +36,8 @@ COOKIE_FILE = BASE_DIR / "youtube_downloads" / "cookies.txt"
 DB_PATH = BASE_DIR / "bot_data.db"
 
 load_dotenv(dotenv_path=BASE_DIR / ".env_ytdl")
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_YTDL") or os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID_YTDL") or os.getenv("ADMIN_ID") or 0)
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_YTDL")
+ADMIN_ID = int(os.getenv("ADMIN_ID_YTDL") or 0)
 
 # In-memory state
 user_sessions = {}
@@ -46,6 +46,9 @@ active_downloads = {}
 rate_limit_store = {}  # user_id -> [timestamps]
 
 TELEGRAM_MAX_FILE = 49 * 1024 * 1024  # ~50MB Telegram limit
+
+# Railway-friendly limits
+MAX_STORAGE_MB = int(os.getenv("MAX_STORAGE_MB", "400"))  # Railway free tier: 512MB
 
 # ==================== DATABASE ====================
 def init_db():
@@ -758,6 +761,51 @@ async def send_audio_file(chat_id, context, output_file, info, history_id=None):
     return sent
 
 # ==================== DOWNLOAD: VIDEO ====================
+def compress_video(input_path, output_path, target_size_mb=48):
+    """Compress video to fit within Telegram's 50MB limit"""
+    try:
+        # Get current size
+        file_size = os.path.getsize(input_path)
+        target_bytes = target_size_mb * 1024 * 1024
+        
+        if file_size <= target_bytes:
+            # No compression needed
+            shutil.copy2(str(input_path), str(output_path))
+            return True
+        
+        # Get video duration for bitrate calculation
+        probe_cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                    '-of', 'default=noprint_wrappers=1:nokey=1', str(input_path)]
+        result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        duration = float(result.stdout.strip()) if result.stdout.strip() else 60
+        
+        # Calculate target bitrate (leave some room for audio)
+        target_bitrate = int((target_bytes * 8) / duration * 0.85)  # 85% for video, 15% for audio
+        
+        # Compress with ffmpeg
+        cmd = [
+            'ffmpeg', '-y', '-i', str(input_path),
+            '-c:v', 'libx264',
+            '-b:v', str(target_bitrate),
+            '-preset', 'fast',  # Balance between speed and quality
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-movflags', '+faststart',
+            str(output_path)
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, timeout=300)
+        if result.returncode == 0:
+            new_size = os.path.getsize(output_path)
+            logger.info(f"Video compressed: {file_size // (1024*1024)}MB -> {new_size // (1024*1024)}MB")
+            return True
+        else:
+            logger.error(f"Compression failed: {result.stderr.decode()[:200]}")
+            return False
+    except Exception as e:
+        logger.error(f"Compression error: {e}")
+        return False
+
 async def download_video(url, chat_id, context, quality='best'):
     resolved = resolve_short_url(url)
     format_map = {
@@ -796,10 +844,30 @@ async def download_video(url, chat_id, context, quality='best'):
             return
 
         file_size = temp_file.stat().st_size
+        
+        # If video is too large, try to compress it
         if file_size > TELEGRAM_MAX_FILE:
-            await status_msg.edit_text(f"❌ ویدئو خیلی بزرگه ({file_size // (1024*1024)}MB)")
-            temp_file.unlink()
-            return
+            await status_msg.edit_text(f"📦 ویدئو خیلی بزرگه ({file_size // (1024*1024)}MB)\n🔄 در حال فشرده‌سازی...")
+            
+            compressed_file = DOWNLOAD_DIR / "temp_video_compressed.mp4"
+            
+            # Try compression
+            success = await asyncio.get_event_loop().run_in_executor(
+                None, compress_video, temp_file, compressed_file, 48
+            )
+            
+            if success and compressed_file.exists() and compressed_file.stat().st_size <= TELEGRAM_MAX_FILE:
+                # Use compressed version
+                temp_file.unlink()
+                temp_file = compressed_file
+                await status_msg.edit_text("📤 در حال آپلود (فشرده‌سازی شده)...")
+            else:
+                # Compression failed or still too large
+                if compressed_file.exists():
+                    compressed_file.unlink()
+                await status_msg.edit_text(f"❌ ویدئو خیلی بزرگه ({file_size // (1024*1024)}MB)\n💡 کیفیت پایین‌تری انتخاب کن")
+                temp_file.unlink()
+                return
 
         await status_msg.edit_text("📤 در حال آپلود...")
 
