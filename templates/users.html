@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مدیریت کاربران - Media Bot</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <nav class="col-md-2 sidebar p-3">
+                <h4 class="mb-4"><i class="bi bi-robot"></i> Media Bot</h4>
+                <ul class="nav flex-column">
+                    <li class="nav-item mb-2"><a class="nav-link" href="/"><i class="bi bi-speedometer2"></i> داشبورد</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link active" href="/users"><i class="bi bi-people"></i> کاربران</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/downloads"><i class="bi bi-download"></i> دانلودها</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/cookies"><i class="bi bi-cookie"></i> کوکی‌ها</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/queue"><i class="bi bi-queue"></i> صف دانلود</a></li>
+                </ul>
+            </nav>
+            <main class="col-md-10 p-4">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-people"></i> مدیریت کاربران</h2>
+                    <button class="btn btn-outline-primary" onclick="loadUsers()"><i class="bi bi-arrow-clockwise"></i> بروزرسانی</button>
+                </div>
+                
+                <div class="card">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>نام کاربری</th>
+                                        <th>نام</th>
+                                        <th>آدمین</th>
+                                        <th>مسدود</th>
+                                        <th>محدودیت روزانه</th>
+                                        <th>استفاده شده</th>
+                                        <th>بازنشانی</th>
+                                        <th>عضویت</th>
+                                        <th>عملیات</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="users-body">
+                                    <tr><td colspan="10" class="text-center">در حال بارگذاری...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div class="modal fade" id="editModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">ویرایش کاربر</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="edit-user-id">
+                    <div class="mb-3">
+                        <label class="form-label">آدمین</label>
+                        <select class="form-select" id="edit-is-admin">
+                            <option value="false">خیر</option>
+                            <option value="true">بله</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">مسدود</label>
+                        <select class="form-select" id="edit-is-banned">
+                            <option value="false">خیر</option>
+                            <option value="true">بله</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">محدودیت روزانه</label>
+                        <input type="number" class="form-control" id="edit-quota" min="1" max="500">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">انصراف</button>
+                    <button type="button" class="btn btn-primary" onclick="saveUser()">ذخیره</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        async function loadUsers() {
+            try {
+                const res = await fetch('/api/users');
+                const users = await res.json();
+                const tbody = document.getElementById('users-body');
+                
+                if (users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="10" class="text-center">هیچ کاربری یافت نشد</td></tr>';
+                } else {
+                    tbody.innerHTML = users.map(u => `
+                        <tr>
+                            <td>${u.id}</td>
+                            <td>@${u.username || '—'}</td>
+                            <td>${u.first_name || ''} ${u.last_name || ''}</td>
+                            <td><span class="badge ${u.is_admin ? 'bg-success' : 'bg-secondary'}">${u.is_admin ? 'بله' : 'خیر'}</span></td>
+                            <td><span class="badge ${u.is_banned ? 'bg-danger' : 'bg-secondary'}">${u.is_banned ? 'بله' : 'خیر'}</span></td>
+                            <td>${u.daily_download_limit}</td>
+                            <td>${u.daily_downloads_used}</td>
+                            <td>${u.quota_reset_date}</td>
+                            <td>${new Date(u.created_at).toLocaleDateString('fa-IR')}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" onclick="editUser(${JSON.stringify(u).replace(/"/g, '"')})">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Failed to load users:', e);
+            }
+        }
+        
+        function editUser(user) {
+            document.getElementById('edit-user-id').value = user.id;
+            document.getElementById('edit-is-admin').value = user.is_admin.toString();
+            document.getElementById('edit-is-banned').value = user.is_banned.toString();
+            document.getElementById('edit-quota').value = user.daily_download_limit;
+            
+            new bootstrap.Modal(document.getElementById('editModal')).show();
+        }
+        
+        async function saveUser() {
+            const userId = document.getElementById('edit-user-id').value;
+            const data = {
+                is_admin: document.getElementById('edit-is-admin').value === 'true',
+                is_banned: document.getElementById('edit-is-banned').value === 'true',
+                daily_download_limit: parseInt(document.getElementById('edit-quota').value)
+            };
+            
+            try {
+                await fetch(`/api/users/${userId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+                loadUsers();
+            } catch (e) {
+                console.error('Failed to save user:', e);
+                alert('خطا در ذخیره');
+            }
+        }
+        
+        loadUsers();
+    </script>
+</body>
+</html>

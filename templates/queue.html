@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>صف دانلود - Media Bot</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <nav class="col-md-2 sidebar p-3">
+                <h4 class="mb-4"><i class="bi bi-robot"></i> Media Bot</h4>
+                <ul class="nav flex-column">
+                    <li class="nav-item mb-2"><a class="nav-link" href="/"><i class="bi bi-speedometer2"></i> داشبورد</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/users"><i class="bi bi-people"></i> کاربران</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/downloads"><i class="bi bi-download"></i> دانلودها</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/cookies"><i class="bi bi-cookie"></i> کوکی‌ها</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link active" href="/queue"><i class="bi bi-queue"></i> صف دانلود</a></li>
+                </ul>
+            </nav>
+            <main class="col-md-10 p-4">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-queue"></i> صف دانلود</h2>
+                    <div>
+                        <button class="btn btn-outline-primary me-2" onclick="loadQueue()"><i class="bi bi-arrow-clockwise"></i> بروزرسانی</button>
+                        <button class="btn btn-outline-warning" onclick="requeueStale()"><i class="bi bi-arrow-repeat"></i> باز صف کردن منقضی‌ها</button>
+                    </div>
+                </div>
+                
+                <!-- Queue Stats -->
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <div class="card stat-card text-center p-3">
+                            <div class="h3 text-secondary" id="queue-pending">-</div>
+                            <div class="text-muted">در انتظار</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card stat-card text-center p-3">
+                            <div class="h3 text-primary" id="queue-processing">-</div>
+                            <div class="text-muted">در حال پردازش</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card stat-card text-center p-3">
+                            <div class="h3 text-success" id="queue-workers">-</div>
+                            <div class="text-muted">ورکرهای فعال</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Processing Tasks -->
+                <div class="card mb-4">
+                    <div class="card-header"><h5 class="mb-0"><i class="bi bi-hourglass-split"></i> در حال پردازش</h5></div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>کاربر</th>
+                                        <th>عنوان</th>
+                                        <th>پلتفرم</th>
+                                        <th>نوع</th>
+                                        <th>پیشرفت</th>
+                                        <th>تلاش‌ها</th>
+                                        <th>ساخته شده</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="processing-body">
+                                    <tr><td colspan="8" class="text-center">در حال بارگذاری...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Pending Tasks -->
+                <div class="card">
+                    <div class="card-header"><h5 class="mb-0"><i class="bi bi-clock"></i> در صف انتظار</h5></div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>کاربر</th>
+                                        <th>عنوان</th>
+                                        <th>پلتفرم</th>
+                                        <th>نوع</th>
+                                        <th>اولویت</th>
+                                        <th>ساخته شده</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pending-body">
+                                    <tr><td colspan="7" class="text-center">در حال بارگذاری...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        async function loadQueue() {
+            try {
+                const [statsRes, processingRes, pendingRes] = await Promise.all([
+                    fetch('/api/queue/stats'),
+                    fetch('/api/queue/processing'),
+                    fetch('/api/queue/pending')
+                ]);
+                
+                const stats = await statsRes.json();
+                const processing = await processingRes.json();
+                const pending = await pendingRes.json();
+                
+                document.getElementById('queue-pending').textContent = stats.pending;
+                document.getElementById('queue-processing').textContent = stats.processing;
+                document.getElementById('queue-workers').textContent = stats.active_workers;
+                
+                // Processing tasks
+                const pbody = document.getElementById('processing-body');
+                if (processing.length === 0) {
+                    pbody.innerHTML = '<tr><td colspan="8" class="text-center">هیچ تسکی در حال پردازش نیست</td></tr>';
+                } else {
+                    pbody.innerHTML = processing.map(t => `
+                        <tr>
+                            <td>${t.id.substring(0,8)}...</td>
+                            <td>${t.user_id}</td>
+                            <td>${t.title || '—'}</td>
+                            <td><span class="badge bg-secondary">${t.platform}</span></td>
+                            <td><span class="badge bg-info">${t.content_type}</span></td>
+                            <td>
+                                <div class="progress" style="height: 20px;">
+                                    <div class="progress-bar" role="progressbar" style="width: ${t.progress}%">${t.progress.toFixed(1)}%</div>
+                                </div>
+                            </td>
+                            <td>${t.attempts}/${t.max_attempts}</td>
+                            <td>${new Date(t.created_at * 1000).toLocaleString('fa-IR')}</td>
+                        </tr>
+                    `).join('');
+                }
+                
+                // Pending tasks
+                const qbody = document.getElementById('pending-body');
+                if (pending.length === 0) {
+                    qbody.innerHTML = '<tr><td colspan="7" class="text-center">صف خالی است</td></tr>';
+                } else {
+                    qbody.innerHTML = pending.map(t => `
+                        <tr>
+                            <td>${t.id.substring(0,8)}...</td>
+                            <td>${t.user_id}</td>
+                            <td>${t.title || '—'}</td>
+                            <td><span class="badge bg-secondary">${t.platform}</span></td>
+                            <td><span class="badge bg-info">${t.content_type}</span></td>
+                            <td>${t.priority}</td>
+                            <td>${new Date(t.created_at * 1000).toLocaleString('fa-IR')}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Failed to load queue:', e);
+            }
+        }
+        
+        async function requeueStale() {
+            try {
+                await fetch('/api/queue/requeue-stale', { method: 'POST' });
+                loadQueue();
+            } catch (e) {
+                console.error('Failed to requeue:', e);
+            }
+        }
+        
+        setInterval(loadQueue, 10000);
+        loadQueue();
+    </script>
+</body>
+</html>

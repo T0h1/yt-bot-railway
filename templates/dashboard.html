@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Media Bot Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        .stat-card { transition: transform 0.2s; }
+        .stat-card:hover { transform: translateY(-2px); }
+        .sidebar { min-height: 100vh; background: #f8f9fa; }
+        .nav-link.active { background: #0d6efd; color: white !important; }
+        .refresh-btn { cursor: pointer; }
+        .refresh-btn.loading { opacity: 0.6; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <nav class="col-md-2 sidebar p-3">
+                <h4 class="mb-4"><i class="bi bi-robot"></i> Media Bot</h4>
+                <ul class="nav flex-column">
+                    <li class="nav-item mb-2">
+                        <a class="nav-link active" href="/"><i class="bi bi-speedometer2"></i> داشبورد</a>
+                    </li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link" href="/users"><i class="bi bi-people"></i> کاربران</a>
+                    </li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link" href="/downloads"><i class="bi bi-download"></i> دانلودها</a>
+                    </li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link" href="/cookies"><i class="bi bi-cookie"></i> کوکی‌ها</a>
+                    </li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link" href="/queue"><i class="bi bi-queue"></i> صف دانلود</a>
+                    </li>
+                </ul>
+            </nav>
+
+            <!-- Main Content -->
+            <main class="col-md-10 p-4">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>داشبورد ربات مدیا</h2>
+                    <button class="btn btn-outline-primary refresh-btn" onclick="loadStats()">
+                        <i class="bi bi-arrow-clockwise"></i> بروزرسانی
+                    </button>
+                </div>
+
+                <!-- Stats Cards -->
+                <div class="row mb-4" id="stats-cards">
+                    <div class="col-md-3">
+                        <div class="card stat-card text-center p-3">
+                            <div class="h3 text-primary" id="stat-total">-</div>
+                            <div class="text-muted">کل دانلودها</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card stat-card text-center p-3">
+                            <div class="h3 text-success" id="stat-success">-</div>
+                            <div class="text-muted">موفق</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card stat-card text-center p-3">
+                            <div class="h3 text-info" id="stat-users">-</div>
+                            <div class="text-muted">کاربران</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card stat-card text-center p-3">
+                            <div class="h3 text-warning" id="stat-storage">- MB</div>
+                            <div class="text-muted">فضای استفاده شده</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Queue Stats -->
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <div class="card stat-card text-center p-3">
+                            <div class="h3 text-secondary" id="queue-pending">-</div>
+                            <div class="text-muted">در صف</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card stat-card text-center p-3">
+                            <div class="h3 text-primary" id="queue-processing">-</div>
+                            <div class="text-muted">در حال پردازش</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card stat-card text-center p-3">
+                            <div class="h3 text-success" id="queue-workers">-</div>
+                            <div class="text-muted">ورکرهای فعال</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Downloads -->
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between">
+                        <h5 class="mb-0"><i class="bi bi-clock-history"></i> آخرین دانلودها</h5>
+                        <a href="/downloads" class="btn btn-sm btn-outline-primary">مشاهده همه</a>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0" id="recent-downloads">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>عنوان</th>
+                                        <th>هنرمند</th>
+                                        <th>پلتفرم</th>
+                                        <th>نوع</th>
+                                        <th>وضعیت</th>
+                                        <th>زمان</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="downloads-body">
+                                    <tr><td colspan="6" class="text-center">در حال بارگذاری...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        async function loadStats() {
+            const btn = document.querySelector('.refresh-btn');
+            btn.classList.add('loading');
+            
+            try {
+                const [statsRes, queueRes, downloadsRes] = await Promise.all([
+                    fetch('/api/stats'),
+                    fetch('/api/queue/stats'),
+                    fetch('/api/downloads?limit=10')
+                ]);
+                
+                const stats = await statsRes.json();
+                const queue = await queueRes.json();
+                const downloads = await downloadsRes.json();
+                
+                // Update stat cards
+                document.getElementById('stat-total').textContent = stats.total_downloads;
+                document.getElementById('stat-success').textContent = stats.successful_downloads;
+                document.getElementById('stat-users').textContent = stats.total_users;
+                document.getElementById('stat-storage').textContent = stats.storage_used_mb.toFixed(1);
+                
+                document.getElementById('queue-pending').textContent = queue.pending;
+                document.getElementById('queue-processing').textContent = queue.processing;
+                document.getElementById('queue-workers').textContent = queue.active_workers;
+                
+                // Update downloads table
+                const tbody = document.getElementById('downloads-body');
+                if (downloads.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center">هیچ دانلودی یافت نشد</td></tr>';
+                } else {
+                    tbody.innerHTML = downloads.map(d => `
+                        <tr>
+                            <td>${d.title || '—'}</td>
+                            <td>${d.artist || '—'}</td>
+                            <td><span class="badge bg-secondary">${d.platform}</span></td>
+                            <td><span class="badge bg-info">${d.content_type}</span></td>
+                            <td><span class="badge ${d.status === 'success' ? 'bg-success' : 'bg-danger'}">${d.status}</span></td>
+                            <td>${new Date(d.created_at).toLocaleString('fa-IR')}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Failed to load stats:', e);
+            } finally {
+                btn.classList.remove('loading');
+            }
+        }
+        
+        // Auto-refresh every 30 seconds
+        setInterval(loadStats, 30000);
+        loadStats();
+    </script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تاریخچه دانلودها - Media Bot</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <nav class="col-md-2 sidebar p-3">
+                <h4 class="mb-4"><i class="bi bi-robot"></i> Media Bot</h4>
+                <ul class="nav flex-column">
+                    <li class="nav-item mb-2"><a class="nav-link" href="/"><i class="bi bi-speedometer2"></i> داشبورد</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/users"><i class="bi bi-people"></i> کاربران</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link active" href="/downloads"><i class="bi bi-download"></i> دانلودها</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/cookies"><i class="bi bi-cookie"></i> کوکی‌ها</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/queue"><i class="bi bi-queue"></i> صف دانلود</a></li>
+                </ul>
+            </nav>
+            <main class="col-md-10 p-4">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-download"></i> تاریخچه دانلودها</h2>
+                    <div>
+                        <select class="form-select form-select-sm d-inline-block w-auto" id="limit-select" onchange="loadDownloads()">
+                            <option value="25">25</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                        </select>
+                        <button class="btn btn-outline-primary ms-2" onclick="loadDownloads()"><i class="bi bi-arrow-clockwise"></i> بروزرسانی</button>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>عنوان</th>
+                                        <th>هنرمند</th>
+                                        <th>پلتفرم</th>
+                                        <th>نوع</th>
+                                        <th>وضعیت</th>
+                                        <th>زمان</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="downloads-body">
+                                    <tr><td colspan="7" class="text-center">در حال بارگذاری...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        async function loadDownloads() {
+            const limit = document.getElementById('limit-select').value;
+            try {
+                const res = await fetch(`/api/downloads?limit=${limit}`);
+                const downloads = await res.json();
+                const tbody = document.getElementById('downloads-body');
+                
+                if (downloads.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center">هیچ دانلودی یافت نشد</td></tr>';
+                } else {
+                    tbody.innerHTML = downloads.map((d, i) => `
+                        <tr>
+                            <td>${i + 1}</td>
+                            <td>${d.title || '—'}</td>
+                            <td>${d.artist || '—'}</td>
+                            <td><span class="badge bg-secondary">${d.platform}</span></td>
+                            <td><span class="badge bg-info">${d.content_type}</span></td>
+                            <td><span class="badge ${d.status === 'success' ? 'bg-success' : 'bg-danger'}">${d.status}</span></td>
+                            <td>${new Date(d.created_at).toLocaleString('fa-IR')}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Failed to load downloads:', e);
+            }
+        }
+        
+        loadDownloads();
+    </script>
+</body>
+</html>

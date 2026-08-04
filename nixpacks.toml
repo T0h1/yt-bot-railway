@@ -1,0 +1,8 @@
+[phases.build]
+cmds = ["pip install -r requirements.txt"]
+
+[phases.setup]
+nixPkgs = ["ffmpeg", "python311", "gcc", "pkg-config", "libpq"]
+
+[start]
+cmd = "python3 bot.py"

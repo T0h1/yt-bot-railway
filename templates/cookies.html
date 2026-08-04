@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مدیریت کوکی‌ها - Media Bot</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <nav class="col-md-2 sidebar p-3">
+                <h4 class="mb-4"><i class="bi bi-robot"></i> Media Bot</h4>
+                <ul class="nav flex-column">
+                    <li class="nav-item mb-2"><a class="nav-link" href="/"><i class="bi bi-speedometer2"></i> داشبورد</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/users"><i class="bi bi-people"></i> کاربران</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/downloads"><i class="bi bi-download"></i> دانلودها</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link active" href="/cookies"><i class="bi bi-cookie"></i> کوکی‌ها</a></li>
+                    <li class="nav-item mb-2"><a class="nav-link" href="/queue"><i class="bi bi-queue"></i> صف دانلود</a></li>
+                </ul>
+            </nav>
+            <main class="col-md-10 p-4">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-cookie"></i> مدیریت کوکی‌ها</h2>
+                    <button class="btn btn-outline-primary" onclick="loadCookies()"><i class="bi bi-arrow-clockwise"></i> بروزرسانی</button>
+                </div>
+                
+                <!-- Add Cookie Form -->
+                <div class="card mb-4">
+                    <div class="card-header"><h5 class="mb-0">افزودن/به‌روزرسانی کوکی</h5></div>
+                    <div class="card-body">
+                        <form id="cookie-form">
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">پلتفرم</label>
+                                    <select class="form-select" id="cookie-platform" required>
+                                        <option value="youtube">YouTube</option>
+                                        <option value="soundcloud">SoundCloud</option>
+                                        <option value="instagram">Instagram</option>
+                                        <option value="tiktok">TikTok</option>
+                                        <option value="twitter">Twitter/X</option>
+                                        <option value="facebook">Facebook</option>
+                                        <option value="twitch">Twitch</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-8">
+                                    <label class="form-label">داده کوکی (متن خام)</label>
+                                    <textarea class="form-control" id="cookie-data" rows="4" required placeholder="محتویات فایل کوکی را اینجا چسبانید..."></textarea>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">انقضا (اختیاری)</label>
+                                <input type="datetime-local" class="form-control" id="cookie-expires">
+                            </div>
+                            <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> ذخیره کوکی</button>
+                        </form>
+                    </div>
+                </div>
+                
+                <!-- Cookies List -->
+                <div class="card">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>پلتفرم</th>
+                                        <th>انقضا</th>
+                                        <th>ایجاد شده</th>
+                                        <th>به‌روزرسانی</th>
+                                        <th>عملیات</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cookies-body">
+                                    <tr><td colspan="5" class="text-center">در حال بارگذاری...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        async function loadCookies() {
+            try {
+                const res = await fetch('/api/cookies');
+                const cookies = await res.json();
+                const tbody = document.getElementById('cookies-body');
+                
+                if (cookies.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center">هیچ کوکی‌ای تنظیم نشده</td></tr>';
+                } else {
+                    tbody.innerHTML = cookies.map(c => `
+                        <tr>
+                            <td><span class="badge bg-primary">${c.platform}</span></td>
+                            <td>${c.expires_at ? new Date(c.expires_at).toLocaleString('fa-IR') : 'بدون انقضا'}</td>
+                            <td>${new Date(c.created_at).toLocaleString('fa-IR')}</td>
+                            <td>${new Date(c.updated_at).toLocaleString('fa-IR')}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie('${c.platform}')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Failed to load cookies:', e);
+            }
+        }
+        
+        document.getElementById('cookie-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const platform = document.getElementById('cookie-platform').value;
+            const cookie_data = document.getElementById('cookie-data').value;
+            const expires_at = document.getElementById('cookie-expires').value || null;
+            
+            try {
+                await fetch('/api/cookies', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ platform, cookie_data, expires_at })
+                });
+                document.getElementById('cookie-form').reset();
+                loadCookies();
+            } catch (e) {
+                console.error('Failed to save cookie:', e);
+                alert('خطا در ذخیره کوکی');
+            }
+        });
+        
+        async function deleteCookie(platform) {
+            if (!confirm(`آیا کوکی ${platform} حذف شود؟`)) return;
+            try {
+                await fetch(`/api/cookies/${platform}`, { method: 'DELETE' });
+                loadCookies();
+            } catch (e) {
+                console.error('Failed to delete cookie:', e);
+                alert('خطا در حذف کوکی');
+            }
+        }
+        
+        loadCookies();
+    </script>
+</body>
+</html>

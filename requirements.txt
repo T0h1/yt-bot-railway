@@ -1,5 +1,39 @@
+# Core dependencies
 python-telegram-bot==20.7
 yt-dlp
 requests
 python-dotenv
 mutagen
+
+# Configuration & validation
+pydantic>=2.0
+pydantic-settings>=2.0
+
+# Structured logging
+structlog>=24.0
+
+# Async HTTP client
+aiohttp>=3.9
+
+# Database - PostgreSQL async driver
+asyncpg>=0.29
+
+# Rate limiting - Redis backend (optional)
+redis>=5.0
+
+# Spotify resolution
+spotipy>=2.22
+
+# Health checks & monitoring
+prometheus-client>=0.19  # Metrics for Prometheus
+
+# Web dashboard
+fastapi>=0.110
+uvicorn>=0.29
+jinja2>=3.1
+
+# Audio processing
+pydub>=0.25
+
+# Type hints (for development)
+typing-extensions>=4.8

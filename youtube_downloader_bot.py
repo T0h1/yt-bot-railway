@@ -4,81 +4,80 @@ import re
 import time
 import json
 import shutil
-import sqlite3
 import asyncio
-import logging
+import signal
 import subprocess
 import urllib.request
 from pathlib import Path
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, urlunparse
+from concurrent.futures import ThreadPoolExecutor
 
 import requests as req_lib
 import yt_dlp
-from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes
 )
+from aiohttp import web
+
+# Local imports
+from config import settings, TOKEN, ADMIN_ID, RAILWAY_MODE, VIDEO_COMPRESSION_TARGET_MB, MAX_VIDEO_DURATION_SEC, MAX_STORAGE_MB, WEBHOOK_MODE, PORT, ALLOWED_USERS, MAX_DOWNLOADS_PER_USER_PER_DAY
+from logging_config import setup_logging, get_logger, get_correlation_id, set_correlation_id
+from yt_dlp_async import (
+    extract_info_async,
+    extract_artist_tracks_async,
+    search_async,
+    download_audio_async,
+    download_video_async,
+    set_executor,
+)
+from rate_limiter import check_rate_limit
+from spotify_resolver import get_spotify_resolver
+from lyrics_lrc import fetch_synced_lyrics, embed_synced_lyrics_mp3
+from health_check import start_health_server, stop_health_server
+from database import get_database, close_database
+from download_queue import get_download_queue, close_download_queue, DownloadTask, DownloadStatus
+from cookie_manager import get_cookie_manager
+from metrics import init_metrics, record_download, record_error, set_active_downloads, set_queue_stats, record_rate_limit, setup_metrics_app
+from chunked_upload import upload_with_progress
 
 # ==================== SETUP ====================
-logging.basicConfig(
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger("MediaBot")
+# Initialize structured logging
+setup_logging(log_level=settings.log_level, json_output=settings.log_json)
+logger = get_logger("mediabot")
 
 BASE_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = BASE_DIR / "media_downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 COOKIE_FILE = BASE_DIR / "youtube_downloads" / "cookies.txt"
-DB_PATH = BASE_DIR / "bot_data.db"
 
-load_dotenv(dotenv_path=BASE_DIR / ".env_ytdl")
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_YTDL")
-ADMIN_ID = int(os.getenv("ADMIN_ID_YTDL") or 0)
+# Async yt-dlp executor (controlled thread pool)
+YTDLP_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="yt-dlp")
+
+# Initialize yt-dlp executor
+set_executor(YTDLP_EXECUTOR)
 
 # In-memory state
 user_sessions = {}
-download_queue = asyncio.Queue()
-active_downloads = {}
-rate_limit_store = {}  # user_id -> [timestamps]
 
 TELEGRAM_MAX_FILE = 49 * 1024 * 1024  # ~50MB Telegram limit
 
-# Railway-friendly limits
-MAX_STORAGE_MB = int(os.getenv("MAX_STORAGE_MB", "400"))  # Railway free tier: 512MB
+# Default video quality
+DEFAULT_VIDEO_QUALITY = "480p" if RAILWAY_MODE else "best"
 
-# Railway-specific video limits (reduced for smaller files)
-RAILWAY_MODE = os.getenv("RAILWAY_MODE", "false").lower() == "true"
-if RAILWAY_MODE:
-    # On Railway, use more aggressive compression and lower quality defaults
-    VIDEO_COMPRESSION_TARGET_MB = int(os.getenv("VIDEO_COMPRESSION_TARGET_MB", "20"))  # 20MB target
-    MAX_VIDEO_DURATION_SEC = int(os.getenv("MAX_VIDEO_DURATION_SEC", "300"))  # 5 min max
-    DEFAULT_VIDEO_QUALITY = "480p"  # Default to 480p on Railway
-else:
-    VIDEO_COMPRESSION_TARGET_MB = 48
-    MAX_VIDEO_DURATION_SEC = 0  # No limit
-    DEFAULT_VIDEO_QUALITY = "best"
+# Graceful shutdown flag
+_shutdown_requested = False
 
 # ==================== DATABASE ====================
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS download_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        url TEXT, title TEXT, artist TEXT, album TEXT,
-        platform TEXT, content_type TEXT, status TEXT,
-        file_path TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS user_reactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        history_id INTEGER, user_id INTEGER, action TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.commit()
-    conn.close()
+# Database is now async PostgreSQL via database.py module
+# Old SQLite functions replaced with async database calls
+
+async def init_db():
+    """Initialize database connection and schema."""
+    db = await get_database()
+    logger.info("database_initialized")
 
 def db_log(url, title, artist, album, platform, content_type, status, file_path=""):
     conn = sqlite3.connect(DB_PATH)
@@ -143,15 +142,8 @@ def db_get_logs(limit=15):
     return rows
 
 # ==================== RATE LIMITING ====================
-def check_rate_limit(user_id):
-    now = time.time()
-    if user_id not in rate_limit_store:
-        rate_limit_store[user_id] = []
-    rate_limit_store[user_id] = [t for t in rate_limit_store[user_id] if now - t < 60]
-    if len(rate_limit_store[user_id]) >= 5:
-        return False
-    rate_limit_store[user_id].append(now)
-    return True
+# Now using rate_limiter module with Redis backend and in-memory fallback
+# check_rate_limit imported from rate_limiter
 
 # ==================== URL HELPERS ====================
 def resolve_short_url(url):
@@ -242,78 +234,9 @@ def get_platform_name(url):
         return 'Twitch'
     return 'Unknown'
 
-# ==================== YT-DLP HELPERS ====================
-def extract_info_sync(url, extra_opts=None):
-    opts = {
-        'quiet': True, 'no_warnings': True, 'skip_download': True,
-        'noplaylist': True,
-        'cookiefile': str(COOKIE_FILE) if COOKIE_FILE.exists() else None,
-    }
-    if extra_opts:
-        opts.update(extra_opts)
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=False)
-
-def extract_artist_tracks_sync(url):
-    opts = {
-        'quiet': True, 'no_warnings': True, 'skip_download': True,
-        'extract_flat': True,
-        'cookiefile': str(COOKIE_FILE) if COOKIE_FILE.exists() else None,
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        if not info:
-            return None
-        entries = info.get('entries', [])
-        tracks = []
-        for i, entry in enumerate(entries):
-            if entry:
-                track_url = entry.get('url') or entry.get('webpage_url')
-                if not track_url and entry.get('id'):
-                    ie = entry.get('ie_key', '')
-                    if 'Soundcloud' in ie:
-                        track_url = f"https://soundcloud.com/{entry.get('uploader_id', '')}/{entry.get('id', '')}"
-                    elif 'Youtube' in ie:
-                        track_url = f"https://www.youtube.com/watch?v={entry.get('id', '')}"
-                    else:
-                        track_url = entry.get('id', '')
-                tracks.append({
-                    'title': entry.get('title', f'Track {i+1}'),
-                    'url': track_url,
-                    'duration': entry.get('duration', 0),
-                    'id': entry.get('id', ''),
-                    'uploader': entry.get('uploader', ''),
-                    'thumbnail': entry.get('thumbnail', ''),
-                })
-        return {
-            'title': info.get('title', 'Unknown'),
-            'thumbnail': info.get('thumbnail'),
-            'description': info.get('description', ''),
-            'uploader': info.get('uploader', ''),
-            'tracks': tracks,
-        }
-
-def search_sync(query, max_results=5):
-    opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'extract_flat': True}
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"scsearch{max_results}:{query}", download=False)
-            if not info or not info.get('entries'):
-                return []
-            results = []
-            for e in info['entries']:
-                if e:
-                    results.append({
-                        'title': e.get('title', 'Unknown'),
-                        'url': e.get('url') or e.get('webpage_url', ''),
-                        'uploader': e.get('uploader', ''),
-                        'thumbnail': e.get('thumbnail', ''),
-                        'duration': e.get('duration', 0),
-                    })
-            return results
-    except Exception as e:
-        logger.error(f"Search error: {e}")
-        return []
+# ==================== YT-DLP HELPERS (ASYNC) ====================
+# These are now imported from yt_dlp_async module
+# extract_info_async, extract_artist_tracks_async, search_async, download_audio_async, download_video_async
 
 # ==================== PROGRESS BAR ====================
 def make_progress_bar(pct):
@@ -820,11 +743,14 @@ def compress_video(input_path, output_path, target_size_mb=48):
 
 async def download_video(url, chat_id, context, quality='best'):
     resolved = resolve_short_url(url)
+    cid = get_correlation_id()
+    logger.info("download_video_started", url=url, quality=quality, chat_id=chat_id, correlation_id=cid)
+    start_time = time.time()
     
     # Use Railway-aware default quality if not explicitly specified
     if quality == 'best' and RAILWAY_MODE:
         quality = DEFAULT_VIDEO_QUALITY
-    
+
     format_map = {
         'best': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
         '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]',
@@ -837,50 +763,40 @@ async def download_video(url, chat_id, context, quality='best'):
     try:
         status_msg = await context.bot.send_message(chat_id=chat_id, text=f"🎬 در حال دانلود ویدئو ({quality})...")
 
-        def do_download():
-            opts = {
-                'outtmpl': str(DOWNLOAD_DIR / 'temp_video.%(ext)s'),
-                'format': fmt,
-                'merge_output_format': 'mp4',
-                'quiet': True,
-                'cookiefile': str(COOKIE_FILE) if COOKIE_FILE.exists() else None,
-            }
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                return ydl.extract_info(resolved, download=True)
-
-        info = await asyncio.get_event_loop().run_in_executor(None, do_download)
-
-        temp_file = None
-        for f in DOWNLOAD_DIR.glob('temp_video.*'):
-            if f.is_file():
-                temp_file = f
-                break
-
-        if not temp_file:
+        # Download video using async wrapper
+        temp_file_path = await download_video_async(resolved, str(DOWNLOAD_DIR), fmt)
+        if not temp_file_path:
             await status_msg.edit_text("❌ فایل ویدئو یافت نشد")
+            record_download('YouTube', 'video', 'failed', time.time() - start_time)
+            record_error('YouTube', "no_file")
             return
 
+        temp_file = Path(temp_file_path)
+
         # Check duration limit (Railway mode)
+        info = await extract_info_async(resolved)
         duration = info.get('duration', 0)
         if MAX_VIDEO_DURATION_SEC > 0 and duration > MAX_VIDEO_DURATION_SEC:
             temp_file.unlink()
             mins = MAX_VIDEO_DURATION_SEC // 60
             await status_msg.edit_text(f"❌ ویدئو خیلی طولانیه ({duration//60}:{duration%60:02d})\n💡 حداکثر {mins} دقیقه در حالت Railway")
+            record_download('YouTube', 'video', 'failed', time.time() - start_time)
+            record_error('YouTube', "duration_exceeded")
             return
 
         file_size = temp_file.stat().st_size
-        
+
         # If video is too large, try to compress it
         if file_size > TELEGRAM_MAX_FILE:
             await status_msg.edit_text(f"📦 ویدئو خیلی بزرگه ({file_size // (1024*1024)}MB)\n🔄 در حال فشرده‌سازی...")
-            
+
             compressed_file = DOWNLOAD_DIR / "temp_video_compressed.mp4"
-            
+
             # Try compression with Railway-aware target
             success = await asyncio.get_event_loop().run_in_executor(
                 None, compress_video, temp_file, compressed_file, VIDEO_COMPRESSION_TARGET_MB
             )
-            
+
             if success and compressed_file.exists() and compressed_file.stat().st_size <= TELEGRAM_MAX_FILE:
                 # Use compressed version
                 temp_file.unlink()
@@ -892,6 +808,8 @@ async def download_video(url, chat_id, context, quality='best'):
                     compressed_file.unlink()
                 await status_msg.edit_text(f"❌ ویدئو خیلی بزرگه ({file_size // (1024*1024)}MB)\n💡 کیفیت پایین‌تری انتخاب کن")
                 temp_file.unlink()
+                record_download('YouTube', 'video', 'failed', time.time() - start_time)
+                record_error('YouTube', "file_too_large")
                 return
 
         await status_msg.edit_text("📤 در حال آپلود...")
@@ -901,6 +819,47 @@ async def download_video(url, chat_id, context, quality='best'):
         duration = info.get('duration', 0)
         caption = f"🎬 {title}\n📐 کیفیت: {quality}"
 
+        file_size = temp_file.stat().st_size
+        
+        # For files > 50MB, use chunked upload
+        if file_size > TELEGRAM_MAX_FILE:
+            await status_msg.edit_text(f"📤 آپلود فایل بزرگ ({file_size // (1024*1024)}MB)...")
+            
+            async def progress_cb(sent, total):
+                try:
+                    pct = (sent / total) * 100
+                    await status_msg.edit_text(f"📤 آپلود... {pct:.1f}% ({sent // (1024*1024)}/{total // (1024*1024)} MB)")
+                except:
+                    pass
+            
+            result = await upload_with_progress(
+                bot_token=TOKEN,
+                chat_id=chat_id,
+                file_path=temp_file,
+                method='sendVideo',
+                caption=caption,
+                title=title,
+                duration=duration,
+                thumbnail=thumbnail,
+                progress_callback=progress_cb,
+            )
+            
+            if result:
+                platform = get_platform_name(url)
+                await db_log(url, title, info.get('uploader', ''), '', platform, 'video', 'success', str(temp_file))
+                await status_msg.edit_text("✅ ویدئو ارسال شد!")
+                temp_file.unlink()
+                record_download('YouTube', 'video', 'success', time.time() - start_time)
+                logger.info("download_video_completed", title=title, correlation_id=cid)
+                return
+            else:
+                await status_msg.edit_text("❌ خطا در آپلود فایل بزرگ")
+                temp_file.unlink()
+                record_download('YouTube', 'video', 'failed', time.time() - start_time)
+                record_error('YouTube', "chunked_upload_failed")
+                return
+
+        # Regular upload for files <= 50MB
         with open(temp_file, 'rb') as f:
             await context.bot.send_video(
                 chat_id=chat_id, video=f, caption=caption,
@@ -909,16 +868,20 @@ async def download_video(url, chat_id, context, quality='best'):
             )
 
         platform = get_platform_name(url)
-        db_log(url, title, info.get('uploader', ''), '', platform, 'video', 'success', str(temp_file))
+        await db_log(url, title, info.get('uploader', ''), '', platform, 'video', 'success', str(temp_file))
         await status_msg.edit_text("✅ ویدئو ارسال شد!")
         temp_file.unlink()
+        record_download('YouTube', 'video', 'success', time.time() - start_time)
+        logger.info("download_video_completed", title=title, correlation_id=cid)
 
     except Exception as e:
-        logger.error(f"Video download error: {e}")
+        logger.error("download_video_error", error=str(e), correlation_id=cid)
         try:
             await status_msg.edit_text(f"❌ خطا: {str(e)[:200]}")
         except:
             pass
+        record_download('YouTube', 'video', 'error', time.time() - start_time)
+        record_error('YouTube', type(e).__name__)
 
 # ==================== QUALITY SELECTION (YouTube) ====================
 async def show_quality_menu(url, update, context):
@@ -985,7 +948,7 @@ async def show_artist_profile(url, update, context, page=0):
 
     try:
         resolved = resolve_short_url(url)
-        data = await asyncio.get_event_loop().run_in_executor(None, extract_artist_tracks_sync, resolved)
+        data = await extract_artist_tracks_async(resolved)
 
         if not data or not data.get('tracks'):
             await status_msg.edit_text("❌ اطلاعات آرتیست یافت نشد.")
@@ -1008,6 +971,7 @@ async def show_artist_profile(url, update, context, page=0):
                                            parse_mode='Markdown', reply_markup=kb)
         await status_msg.delete()
     except Exception as e:
+        logger.error("show_artist_profile_error", error=str(e))
         await status_msg.edit_text(f"❌ خطا: {str(e)[:200]}")
 
 # ==================== CALLBACK HANDLER ====================
@@ -1029,7 +993,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if quality == 'audio':
             output_file, err = await download_audio(url, chat_id, context)
             if output_file:
-                info = await asyncio.get_event_loop().run_in_executor(None, extract_info_sync, resolve_short_url(url))
+                info = await extract_info_async(resolve_short_url(url))
                 hist_id = db_log(url, info.get('title', ''), info.get('uploader', ''), '', get_platform_name(url), 'audio', 'success')
                 await send_audio_file(chat_id, context, output_file, info, hist_id)
                 if output_file.exists():
@@ -1055,17 +1019,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("preview_"):
         hist_id = int(data.split("_")[1])
         await query.edit_message_text("🔊 در حال ساخت پیش‌نمایش 30 ثانیه‌ای...")
-        conn = sqlite3.connect(DB_PATH)
-        row = conn.execute("SELECT file_path, title FROM download_history WHERE id=?", (hist_id,)).fetchone()
-        conn.close()
-        if row and row[0] and Path(row[0]).exists():
+        row = await db_get_download_file(hist_id)
+        if row and row.get("file_path") and Path(row["file_path"]).exists():
             preview_path = DOWNLOAD_DIR / f"preview_{hist_id}.mp3"
             ok = await asyncio.get_event_loop().run_in_executor(
-                None, create_preview, row[0], preview_path, 30
+                None, create_preview, row["file_path"], preview_path, 30
             )
             if ok and preview_path.exists():
                 with open(preview_path, 'rb') as f:
-                    await context.bot.send_audio(chat_id=chat_id, audio=f, title=f"Preview: {row[1]}")
+                    await context.bot.send_audio(chat_id=chat_id, audio=f, title=f"Preview: {row['title']}")
                 preview_path.unlink()
                 await query.edit_message_text("🔊 پیش‌نمایش ارسال شد!")
             else:
@@ -1152,7 +1114,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if artist_url:
                 await query.edit_message_text(f"🎤 در حال باز کردن {results[idx]['title']}...")
                 resolved = resolve_short_url(artist_url)
-                data2 = await asyncio.get_event_loop().run_in_executor(None, extract_artist_tracks_sync, resolved)
+                data2 = await extract_artist_tracks_async(resolved)
                 if data2 and data2.get('tracks'):
                     all_tracks = data2['tracks']
                     user_sessions[chat_id] = {
@@ -1225,7 +1187,7 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     status = await update.message.reply_text(f"🔍 جستجوی '{query}'...")
-    results = await asyncio.get_event_loop().run_in_executor(None, search_sync, query, 5)
+    results = await search_async(query, 5)
 
     if not results:
         await status.edit_text(f"❌ نتیجه‌ای یافت نشد.")
@@ -1296,18 +1258,14 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stat = os.statvfs(str(DOWNLOAD_DIR))
     free_gb = (stat.f_bavail * stat.f_frsize) / (1024**3)
     used_mb = sum(f.stat().st_size for f in DOWNLOAD_DIR.iterdir() if f.is_file()) / (1024**2)
-    conn = sqlite3.connect(DB_PATH)
-    total_dl = conn.execute("SELECT COUNT(*) FROM download_history").fetchone()[0]
-    success_dl = conn.execute("SELECT COUNT(*) FROM download_history WHERE status='success'").fetchone()[0]
-    likes = conn.execute("SELECT COUNT(*) FROM user_reactions WHERE action='like'").fetchone()[0]
-    conn.close()
+    stats = await db_get_stats()
     await update.message.reply_text(
         f"📊 **آمار سیستم:**\n\n"
         f"💾 فضای دیسک آزاد: {free_gb:.2f} GB\n"
         f"📁 حجم فایل‌ها: {used_mb:.1f} MB\n"
-        f"📥 کل دانلودها: {total_dl}\n"
-        f"✅ موفق: {success_dl}\n"
-        f"❤️ لایک‌ها: {likes}\n"
+        f"📥 کل دانلودها: {stats['total']}\n"
+        f"✅ موفق: {stats['success']}\n"
+        f"❤️ لایک‌ها: {stats['likes']}\n"
         f"🔄 فایل‌های فعال: {sum(1 for f in DOWNLOAD_DIR.iterdir() if f.is_file())}",
         parse_mode='Markdown'
     )
@@ -1327,23 +1285,46 @@ async def cmd_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== MAIN MESSAGE HANDLER ====================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if ADMIN_ID and update.effective_user.id != ADMIN_ID:
+    user_id = update.effective_user.id
+    
+    # Check if user is allowed (if ALLOWED_USERS is configured)
+    if ALLOWED_USERS and user_id not in ALLOWED_USERS:
+        await update.message.reply_text("❌ شما اجازه استفاده از ربات را ندارید.")
         return
+    
+    # Check user quota
+    if settings.postgres_dsn:
+        from database import get_database
+        db = await get_database()
+        user = await db.get_or_create_user(user_id, 
+            update.effective_user.username or "",
+            update.effective_user.first_name or "",
+            update.effective_user.last_name or "")
+        
+        if user.get("is_banned"):
+            await update.message.reply_text("❌ شما از استفاده از ربات محروم شده‌اید.")
+            return
+            
+        allowed, remaining = await db.check_user_quota(user_id)
+        if not allowed:
+            await update.message.reply_text(f"❌ سهمیه روزانه شما تمام شده است ({MAX_DOWNLOADS_PER_USER_PER_DAY} دانلود در روز).")
+            return
 
     text = update.message.text
     if not text or not text.startswith('http'):
         return
 
-    # Rate limit
-    if not check_rate_limit(update.effective_user.id):
+    # Rate limit using new rate limiter
+    if not await check_rate_limit(user_id):
         await update.message.reply_text("⏳ صبر کن! زیاد دانلود کردی (5 دانلود در دقیقه).")
+        record_rate_limit(user_id)
         return
 
     url_type, resolved = detect_url_type(text)
     chat_id = update.effective_chat.id
     platform = get_platform_name(text)
 
-    logger.info(f"URL: {text} → {url_type} ({platform})")
+    logger.info("url_received", url=text, url_type=url_type, platform=platform)
 
     if url_type == 'artist':
         await show_artist_profile(text, update, context)
@@ -1359,22 +1340,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             # Audio download for all other platforms
             status_msg = await update.message.reply_text(f"🎵 در حال دانلود از {platform}...")
+            start_time = time.time()
             try:
                 for attempt in range(3):
                     output_file, err = await download_audio(text, chat_id, context)
                     if output_file:
-                        info = await asyncio.get_event_loop().run_in_executor(
-                            None, extract_info_sync, resolve_short_url(text)
-                        )
+                        info = await extract_info_async(resolve_short_url(text))
                         if not info:
                             info = {'title': 'Unknown', 'uploader': '', 'album': '',
                                     'duration': 0, 'thumbnail': None}
-                        hist_id = db_log(text, info.get('title', ''), info.get('uploader', ''),
-                                         info.get('album', ''), platform, 'audio', 'success')
+                        hist_id = await db_log(text, info.get('title', ''), info.get('uploader', ''),
+                                             info.get('album', ''), platform, 'audio', 'success')
                         await send_audio_file(chat_id, context, output_file, info, hist_id)
                         if output_file.exists():
                             output_file.unlink()
                         await status_msg.edit_text("✅ ارسال شد!")
+                        record_download(platform, 'audio', 'success', time.time() - start_time)
+                        # Increment user download count
+                        if settings.postgres_dsn:
+                            from database import get_database
+                            db = await get_database()
+                            await db.increment_user_downloads(user_id)
                         break
                     else:
                         if attempt < 2:
@@ -1382,16 +1368,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await asyncio.sleep(2 ** attempt)
                         else:
                             await status_msg.edit_text(f"❌ خطا: {err[:200]}")
-                            db_log(text, '', '', '', platform, 'audio', 'failed')
+                            await db_log(text, '', '', '', platform, 'audio', 'failed')
+                            record_download(platform, 'audio', 'failed', time.time() - start_time)
+                            record_error(platform, "download_failed")
             except Exception as e:
+                logger.error("handle_message_error", error=str(e))
                 await status_msg.edit_text(f"❌ خطا: {str(e)[:200]}")
+                record_download(platform, 'audio', 'error', time.time() - start_time)
+                record_error(platform, type(e).__name__)
 
     elif url_type == 'auto':
         status_msg = await update.message.reply_text("🔍 در حال شناسایی لینک...")
+        start_time = time.time()
         try:
-            info = await asyncio.get_event_loop().run_in_executor(
-                None, extract_info_sync, resolve_short_url(text)
-            )
+            info = await extract_info_async(resolve_short_url(text))
             if info and info.get('entries'):
                 await status_msg.delete()
                 await show_artist_profile(text, update, context)
@@ -1408,15 +1398,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if output_file.exists():
                             output_file.unlink()
                         await status_msg.edit_text("✅ ارسال شد!")
+                        record_download(platform, 'audio', 'success', time.time() - start_time)
                     else:
                         await status_msg.edit_text(f"❌ {err[:200]}")
+                        record_download(platform, 'audio', 'failed', time.time() - start_time)
+                        record_error(platform, "download_failed")
         except Exception as e:
+            logger.error("auto_url_error", error=str(e))
             await status_msg.edit_text(f"❌ خطا: {str(e)[:200]}")
+            record_download(platform, 'audio', 'error', time.time() - start_time)
+            record_error(platform, type(e).__name__)
 
 # ==================== CLEANUP ====================
 async def scheduled_cleanup():
-    while True:
+    while not _shutdown_requested:
         await asyncio.sleep(3600)
+        if _shutdown_requested:
+            break
         try:
             cutoff = time.time() - 3600
             for f in DOWNLOAD_DIR.iterdir():
@@ -1427,14 +1425,99 @@ async def scheduled_cleanup():
                         except:
                             pass
         except Exception as e:
-            logger.error(f"Cleanup error: {e}")
+            logger.error("cleanup_error", error=str(e))
+
+# ==================== GRACEFUL SHUTDOWN ====================
+async def graceful_shutdown(app):
+    """Gracefully shutdown the bot - wait for active downloads, clean up."""
+    global _shutdown_requested
+    _shutdown_requested = True
+    logger.info("shutdown_initiated")
+    
+    # Stop download queue worker
+    queue = await get_download_queue()
+    await queue.stop_worker()
+    await close_download_queue()
+    
+    # Stop health check server
+    await stop_health_server()
+    
+    # Wait for active downloads to complete (max 30 seconds)
+    wait_start = time.time()
+    while active_downloads and (time.time() - wait_start) < 30:
+        logger.info("shutdown_waiting_downloads", active=len(active_downloads))
+        await asyncio.sleep(1)
+    
+    # Clean up temp files
+    for f in DOWNLOAD_DIR.iterdir():
+        if f.is_file() and f.name.startswith("temp_"):
+            try:
+                f.unlink()
+            except:
+                pass
+    
+    # Shutdown executor
+    YTDLP_EXECUTOR.shutdown(wait=True, cancel_futures=True)
+    
+    # Close database connection
+    await close_database()
+    
+    # Stop the application
+    await app.shutdown()
+    logger.info("shutdown_complete")
+
+
+async def process_download_task(task: "DownloadTask") -> None:
+    """Process a download task from the queue."""
+    logger.info("processing_download_task", task_id=task.id, url=task.url, user_id=task.user_id)
+    
+    try:
+        if task.content_type == 'audio':
+            output_file, err = await download_audio(task.url, task.chat_id, None, progress_msg_id=None)
+            if output_file:
+                info = await extract_info_async(resolve_short_url(task.url))
+                if not info:
+                    info = {'title': task.title or 'Unknown', 'uploader': task.artist or '', 'album': '',
+                            'duration': 0, 'thumbnail': None}
+                await send_audio_file(task.chat_id, None, output_file, info, task.id)
+                if output_file.exists():
+                    output_file.unlink()
+            else:
+                raise Exception(f"Download failed: {err}")
+        elif task.content_type == 'video':
+            # For video, we need context which we don't have in worker
+            # Store result for user to retrieve
+            raise Exception("Video downloads not supported in background worker yet")
+        else:
+            raise Exception(f"Unknown content type: {task.content_type}")
+    except Exception as e:
+        logger.error("process_download_task_failed", task_id=task.id, error=str(e))
+        raise
+
+
+def signal_handler(signum, frame):
+    """Handle SIGTERM/SIGINT for graceful shutdown."""
+    global _shutdown_requested
+    _shutdown_requested = True
+    logger.info("signal_received", signal=signum)
 
 # ==================== MAIN ====================
-def main():
-    init_db()
-
+async def main():
+    # Initialize database
+    await init_db()
+    
+    # Initialize download queue
+    await get_download_queue()
+    
+    # Initialize cookie manager
+    get_cookie_manager()
+    
+    # Register signal handlers
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
     app = Application.builder().token(TOKEN).build()
-
+    
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("search", cmd_search))
@@ -1445,12 +1528,79 @@ def main():
     app.add_handler(CommandHandler("logs", cmd_logs))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
+    
+    # Start background tasks
     loop = asyncio.get_event_loop()
     loop.create_task(scheduled_cleanup())
+    
+    # Start health check server in background
+    loop.create_task(start_health_server())
+    
+    # Initialize metrics
+    init_metrics("2.0")
+    
+    # Start metrics server on separate port (PORT + 1)
+    metrics_port = settings.port + 1
+    metrics_app = setup_metrics_app()
+    metrics_runner = web.AppRunner(metrics_app)
+    await metrics_runner.setup()
+    metrics_site = web.TCPSite(metrics_runner, "0.0.0.0", metrics_port)
+    await metrics_site.start()
+    logger.info("metrics_server_started", port=metrics_port)
+    
+    # Start queue stats updater
+    loop.create_task(update_queue_stats_periodically())
+    
+    # Start download queue worker
+    if settings.redis_url:
+        queue = await get_download_queue()
+        await queue.start_worker(process_download_task)
+        logger.info("download_queue_worker_started")
+    
+    logger.info("media_bot_started", version="2.0", railway_mode=RAILWAY_MODE)
+    
+    # Webhook mode for Railway (cost-effective)
+    if settings.webhook_mode and settings.webhook_url:
+        logger.info("starting_webhook_mode", webhook_url=settings.webhook_url, port=settings.port)
+        await app.initialize()
+        await app.start()
+        await app.updater.start_webhook(
+            listen="0.0.0.0",
+            port=settings.port,
+            url_path="/webhook",
+            webhook_url=settings.webhook_url,
+            drop_pending_updates=True,
+        )
+        # Keep running until shutdown
+        try:
+            while not _shutdown_requested:
+                await asyncio.sleep(1)
+        finally:
+            await graceful_shutdown(app)
+            await metrics_runner.cleanup()
+    else:
+        logger.info("starting_polling_mode")
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True)
+        try:
+            while not _shutdown_requested:
+                await asyncio.sleep(1)
+        finally:
+            await graceful_shutdown(app)
+            await metrics_runner.cleanup()
 
-    logger.info("🎵 Media Bot v2.0 started!")
-    app.run_polling(drop_pending_updates=True)
+async def update_queue_stats_periodically():
+    """Periodically update queue stats metrics."""
+    while not _shutdown_requested:
+        try:
+            if settings.redis_url:
+                queue = await get_download_queue()
+                stats = await queue.get_queue_stats()
+                set_queue_stats(stats["pending"], stats["processing"])
+        except Exception as e:
+            logger.error("queue_stats_update_error", error=str(e))
+        await asyncio.sleep(30)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -1,20 +1,13 @@
-import os
+"""Main entry point for the Media Bot."""
+
 import sys
-import subprocess
+import os
+import asyncio
 
-# Install dependencies if needed
-def install_deps():
-    try:
-        import telegram
-        import yt_dlp
-        import mutagen
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+# Add current directory to path for local imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-install_deps()
-
-# Import and run the bot
 from youtube_downloader_bot import main
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
