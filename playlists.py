@@ -9,7 +9,6 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 
-from database import get_database
 from logging_config import get_logger
 
 logger = get_logger("playlists")
@@ -64,6 +63,7 @@ class PlaylistManager:
     
     async def _get_db(self):
         if self.db is None:
+            from database import get_database
             self.db = await get_database()
         return self.db
     
