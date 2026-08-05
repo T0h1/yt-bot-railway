@@ -119,8 +119,12 @@ async def get_system_stats(_: bool = Depends(verify_admin)):
     
     # Get queue stats
     queue = await get_download_queue()
-    qstats = await queue.get_queue_stats()
-    workers = await queue.get_active_workers()
+    if queue:
+        qstats = await queue.get_queue_stats()
+        workers = await queue.get_active_workers()
+    else:
+        qstats = {"pending": 0, "processing": 0}
+        workers = []
     
     # Calculate storage used
     import os
@@ -219,8 +223,12 @@ async def get_downloads(
 @app.get("/api/queue/stats", response_model=QueueStats)
 async def get_queue_stats(_: bool = Depends(verify_admin)):
     queue = await get_download_queue()
-    qstats = await queue.get_queue_stats()
-    workers = await queue.get_active_workers()
+    if queue:
+        qstats = await queue.get_queue_stats()
+        workers = await queue.get_active_workers()
+    else:
+        qstats = {"pending": 0, "processing": 0}
+        workers = []
     return QueueStats(
         pending=qstats.get("pending", 0),
         processing=qstats.get("processing", 0),
@@ -231,22 +239,28 @@ async def get_queue_stats(_: bool = Depends(verify_admin)):
 @app.get("/api/queue/processing")
 async def get_processing_tasks(_: bool = Depends(verify_admin)):
     queue = await get_download_queue()
-    tasks = await queue.get_processing_tasks()
-    return [task.__dict__ for task in tasks]
+    if queue:
+        tasks = await queue.get_processing_tasks()
+        return [task.__dict__ for task in tasks]
+    return []
 
 
 @app.get("/api/queue/pending")
 async def get_pending_tasks(limit: int = Query(50, le=100), _: bool = Depends(verify_admin)):
     queue = await get_download_queue()
-    tasks = await queue.get_pending_tasks(limit)
-    return [task.__dict__ for task in tasks]
+    if queue:
+        tasks = await queue.get_pending_tasks(limit)
+        return [task.__dict__ for task in tasks]
+    return []
 
 
 @app.post("/api/queue/requeue-stale")
 async def requeue_stale(_: bool = Depends(verify_admin)):
     queue = await get_download_queue()
-    count = await queue.requeue_stale_tasks(300)
-    return {"requeued": count}
+    if queue:
+        count = await queue.requeue_stale_tasks(300)
+        return {"requeued": count}
+    return {"requeued": 0}
 
 
 # Web UI Routes

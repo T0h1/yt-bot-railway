@@ -288,11 +288,12 @@ class DownloadQueue:
 _download_queue: Optional[DownloadQueue] = None
 
 
-async def get_download_queue() -> DownloadQueue:
+async def get_download_queue() -> Optional[DownloadQueue]:
     global _download_queue
     if _download_queue is None:
         if not settings.redis_url:
-            raise RuntimeError("REDIS_URL not configured")
+            logger.info("running_without_redis_queue")
+            return None
         _download_queue = DownloadQueue(settings.redis_url)
     return _download_queue
 

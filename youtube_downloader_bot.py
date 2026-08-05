@@ -1441,7 +1441,8 @@ async def graceful_shutdown(app):
     
     # Stop download queue worker
     queue = await get_download_queue()
-    await queue.stop_worker()
+    if queue:
+        await queue.stop_worker()
     await close_download_queue()
     
     # Stop health check server
