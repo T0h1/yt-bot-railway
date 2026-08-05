@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
+import os
 
 from config import settings
 from logging_config import get_logger
@@ -127,7 +128,6 @@ async def get_system_stats(_: bool = Depends(verify_admin)):
         workers = []
     
     # Calculate storage used
-    import os
     storage_used = 0
     download_dir = "media_downloads"
     if os.path.exists(download_dir):
