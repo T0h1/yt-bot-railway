@@ -67,6 +67,15 @@ class PlaylistManager:
             self.db = await get_database()
         return self.db
     
+    def _require_db(self):
+        if self.db is None:
+            raise RuntimeError("Playlist features require PostgreSQL database (POSTGRES_DSN not configured)")
+        return self.db
+    
+    async def _get_db_required(self):
+        db = await self._get_db_required()
+        return self._require_db()
+    
     async def create_playlist(
         self,
         user_id: int,
@@ -75,7 +84,7 @@ class PlaylistManager:
         is_public: bool = False
     ) -> Optional[Playlist]:
         """Create a new playlist."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         
         import secrets
         playlist_id = f"pl_{user_id}_{secrets.token_urlsafe(8)}"
@@ -100,17 +109,17 @@ class PlaylistManager:
     
     async def get_playlist(self, playlist_id: str) -> Optional[Playlist]:
         """Get playlist by ID."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         return await db.get_playlist(playlist_id)
     
     async def get_playlist_by_share_token(self, share_token: str) -> Optional[Playlist]:
         """Get public playlist by share token."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         return await db.get_playlist_by_share_token(share_token)
     
     async def get_user_playlists(self, user_id: int) -> List[Playlist]:
         """Get all playlists for a user."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         return await db.get_user_playlists(user_id)
     
     async def update_playlist(
@@ -122,7 +131,7 @@ class PlaylistManager:
         is_public: Optional[bool] = None
     ) -> bool:
         """Update playlist metadata."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         playlist = await db.get_playlist(playlist_id)
         
         if not playlist or playlist.user_id != user_id:
@@ -152,7 +161,7 @@ class PlaylistManager:
     
     async def delete_playlist(self, playlist_id: str, user_id: int) -> bool:
         """Delete a playlist."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         playlist = await db.get_playlist(playlist_id)
         
         if not playlist or playlist.user_id != user_id:
@@ -178,7 +187,7 @@ class PlaylistManager:
         thumbnail: str = ""
     ) -> bool:
         """Add a track to playlist."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         playlist = await db.get_playlist(playlist_id)
         
         if not playlist or playlist.user_id != user_id:
@@ -217,7 +226,7 @@ class PlaylistManager:
         track_id: str
     ) -> bool:
         """Remove a track from playlist."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         playlist = await db.get_playlist(playlist_id)
         
         if not playlist or playlist.user_id != user_id:
@@ -246,7 +255,7 @@ class PlaylistManager:
         track_ids: List[str]
     ) -> bool:
         """Reorder tracks in playlist."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         playlist = await db.get_playlist(playlist_id)
         
         if not playlist or playlist.user_id != user_id:
@@ -276,7 +285,7 @@ class PlaylistManager:
     
     async def get_share_url(self, playlist_id: str, base_url: str = "") -> Optional[str]:
         """Get shareable URL for a public playlist."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         playlist = await db.get_playlist(playlist_id)
         
         if not playlist or not playlist.is_public or not playlist.share_token:
@@ -340,12 +349,12 @@ class PlaylistManager:
     
     async def search_playlists(self, query: str, user_id: int = None) -> List[Playlist]:
         """Search playlists by name/description."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         return await db.search_playlists(query, user_id)
     
     async def get_public_playlists(self, limit: int = 50, offset: int = 0) -> List[Playlist]:
         """Get public playlists for discovery."""
-        db = await self._get_db()
+        db = await self._get_db_required()
         return await db.get_public_playlists(limit, offset)
 
 

@@ -311,13 +311,14 @@ class Database:
 _database: Optional[Database] = None
 
 
-async def get_database() -> Database:
-    """Get or create global database instance."""
+async def get_database() -> Optional[Database]:
+    """Get or create global database instance. Returns None if PostgreSQL not configured."""
     global _database
     if _database is None:
         dsn = settings.postgres_dsn
         if not dsn:
-            raise RuntimeError("POSTGRES_DSN not configured")
+            logger.warning("PostgreSQL not configured - running without persistent database")
+            return None
         _database = Database(dsn)
         await _database.connect()
         await _database.init_schema()

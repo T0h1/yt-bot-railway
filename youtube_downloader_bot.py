@@ -77,7 +77,10 @@ _shutdown_requested = False
 async def init_db():
     """Initialize database connection and schema."""
     db = await get_database()
-    logger.info("database_initialized")
+    if db:
+        logger.info("database_initialized")
+    else:
+        logger.info("running_without_database")
 
 def db_log(url, title, artist, album, platform, content_type, status, file_path=""):
     conn = sqlite3.connect(DB_PATH)
@@ -1296,19 +1299,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if settings.postgres_dsn:
         from database import get_database
         db = await get_database()
-        user = await db.get_or_create_user(user_id, 
-            update.effective_user.username or "",
-            update.effective_user.first_name or "",
-            update.effective_user.last_name or "")
-        
-        if user.get("is_banned"):
-            await update.message.reply_text("❌ شما از استفاده از ربات محروم شده‌اید.")
-            return
+        if db:
+            user = await db.get_or_create_user(user_id, 
+                update.effective_user.username or "",
+                update.effective_user.first_name or "",
+                update.effective_user.last_name or "")
             
-        allowed, remaining = await db.check_user_quota(user_id)
-        if not allowed:
-            await update.message.reply_text(f"❌ سهمیه روزانه شما تمام شده است ({MAX_DOWNLOADS_PER_USER_PER_DAY} دانلود در روز).")
-            return
+            if user.get("is_banned"):
+                await update.message.reply_text("❌ شما از استفاده از ربات محروم شده‌اید.")
+                return
+                
+            allowed, remaining = await db.check_user_quota(user_id)
+            if not allowed:
+                await update.message.reply_text(f"❌ سهمیه روزانه شما تمام شده است ({MAX_DOWNLOADS_PER_USER_PER_DAY} دانلود در روز).")
+                return
 
     text = update.message.text
     if not text or not text.startswith('http'):
@@ -1360,7 +1364,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if settings.postgres_dsn:
                             from database import get_database
                             db = await get_database()
-                            await db.increment_user_downloads(user_id)
+                            if db:
+                                await db.increment_user_downloads(user_id)
                         break
                     else:
                         if attempt < 2:

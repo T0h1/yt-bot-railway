@@ -93,6 +93,15 @@ class LogEntry(BaseModel):
 
 
 # API Routes
+
+async def get_db_or_404():
+    """Get database or raise 503 if not configured."""
+    from database import get_database
+    db = await get_db_or_404()
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not configured - PostgreSQL required for this feature")
+    return db
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
@@ -100,7 +109,7 @@ async def health():
 
 @app.get("/api/stats", response_model=SystemStats)
 async def get_system_stats(_: bool = Depends(verify_admin)):
-    db = await get_database()
+    db = await get_db_or_404()
     
     # Get download stats
     stats = await db.get_stats()
@@ -139,14 +148,14 @@ async def get_system_stats(_: bool = Depends(verify_admin)):
 
 @app.get("/api/users", response_model=List[UserResponse])
 async def get_users(_: bool = Depends(verify_admin)):
-    db = await get_database()
+    db = await get_db_or_404()
     users = await db.get_all_users()
     return [UserResponse(**u) for u in users]
 
 
 @app.get("/api/users/{user_id}", response_model=UserResponse)
 async def get_user(user_id: int, _: bool = Depends(verify_admin)):
-    db = await get_database()
+    db = await get_db_or_404()
     users = await db.get_all_users()
     user = next((u for u in users if u["id"] == user_id), None)
     if not user:
@@ -156,7 +165,7 @@ async def get_user(user_id: int, _: bool = Depends(verify_admin)):
 
 @app.patch("/api/users/{user_id}", response_model=UserResponse)
 async def update_user(user_id: int, update: UserUpdate, _: bool = Depends(verify_admin)):
-    db = await get_database()
+    db = await get_db_or_404()
     
     if update.is_admin is not None:
         await db.set_user_admin(user_id, update.is_admin)
@@ -174,14 +183,14 @@ async def update_user(user_id: int, update: UserUpdate, _: bool = Depends(verify
 
 @app.get("/api/cookies", response_model=List[CookieResponse])
 async def get_cookies(_: bool = Depends(verify_admin)):
-    db = await get_database()
+    db = await get_db_or_404()
     cookies = await db.list_cookies()
     return [CookieResponse(**c) for c in cookies]
 
 
 @app.post("/api/cookies", response_model=CookieResponse)
 async def create_cookie(cookie: CookieCreate, _: bool = Depends(verify_admin)):
-    db = await get_database()
+    db = await get_db_or_404()
     expires = None
     if cookie.expires_at:
         expires = datetime.fromisoformat(cookie.expires_at)
@@ -202,7 +211,7 @@ async def get_downloads(
     limit: int = Query(50, le=100),
     _: bool = Depends(verify_admin)
 ):
-    db = await get_database()
+    db = await get_db_or_404()
     history = await db.get_history(limit)
     return [LogEntry(**h) for h in history]
 

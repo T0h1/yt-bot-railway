@@ -21,9 +21,16 @@ class CookieManager:
 
     async def save_cookies(self, platform: str, cookie_data: str, expires_at: Optional[float] = None) -> bool:
         """Save cookies for a platform."""
+        if not settings.postgres_dsn:
+            logger.warning("cookies_save_skipped_no_database", platform=platform)
+            self._cookies_cache[platform] = cookie_data
+            return True
         try:
             from database import get_database
             db = await get_database()
+            if not db:
+                self._cookies_cache[platform] = cookie_data
+                return True
             await db.save_cookies(platform, cookie_data, expires_at)
             self._cookies_cache[platform] = cookie_data
             logger.info("cookies_saved", platform=platform)
@@ -38,9 +45,14 @@ class CookieManager:
         if platform in self._cookies_cache:
             return self._cookies_cache[platform]
 
+        if not settings.postgres_dsn:
+            return None
+            
         try:
             from database import get_database
             db = await get_database()
+            if not db:
+                return None
             cookie_data = await db.get_cookies(platform)
             if cookie_data:
                 self._cookies_cache[platform] = cookie_data
