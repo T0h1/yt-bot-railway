@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    # Telegram Bot
+    # Telegram Bot (REQUIRED - only these two need manual setup)
     telegram_bot_token_ytdl: str = Field(
         default="", description="Telegram Bot Token (primary)"
     )
@@ -29,15 +29,15 @@ class Settings(BaseSettings):
     )
     max_storage_mb: int = Field(default=400, description="Max storage in MB before cleanup")
 
-    # Optional: External services
-    redis_url: str = Field(default="", description="Redis URL for rate limiting/queue")
-    postgres_dsn: str = Field(default="", description="PostgreSQL DSN for persistent storage")
+    # Optional: External services - AUTO-DETECTED from Railway
+    redis_url: str = Field(default="", description="Redis URL (auto-detected from Railway)")
+    postgres_dsn: str = Field(default="", description="PostgreSQL DSN (auto-detected from Railway)")
     sentry_dsn: str = Field(default="", description="Sentry DSN for error tracking")
     spotify_client_id: str = Field(default="", description="Spotify API Client ID")
     spotify_client_secret: str = Field(default="", description="Spotify API Client Secret")
     cookie_file: str = Field(default="", description="Path to cookies file for yt-dlp")
 
-    # Optional: Railway public domain for webhook
+    # Optional: Railway public domain for webhook (AUTO-SET by Railway)
     railway_public_domain: str = Field(
         default="", description="Railway public domain (auto-set by Railway)"
     )
@@ -77,6 +77,32 @@ class Settings(BaseSettings):
         if self.railway_public_domain:
             return f"https://{self.railway_public_domain}/webhook"
         return None
+
+    def __init__(self, **kwargs):
+        # Auto-detect Railway provided variables BEFORE validation
+        super().__init__(**kwargs)
+        self._auto_detect_railway_vars()
+
+    def _auto_detect_railway_vars(self):
+        """Auto-detect Railway-provided environment variables."""
+        # PostgreSQL: Railway provides DATABASE_URL
+        if not self.postgres_dsn:
+            self.postgres_dsn = os.environ.get("DATABASE_URL", "")
+        
+        # Redis: Railway provides REDIS_URL
+        if not self.redis_url:
+            self.redis_url = os.environ.get("REDIS_URL", "")
+        
+        # Railway public domain: Railway provides RAILWAY_PUBLIC_DOMAIN or RAILWAY_STATIC_URL
+        if not self.railway_public_domain:
+            self.railway_public_domain = (
+                os.environ.get("RAILWAY_PUBLIC_DOMAIN", "") 
+                or os.environ.get("RAILWAY_STATIC_URL", "").replace("https://", "").replace("http://", "")
+            )
+        
+        # Port: Railway provides PORT
+        if not self.port or self.port == 8080:
+            self.port = int(os.environ.get("PORT", "8080"))
 
 
 # Global settings instance
