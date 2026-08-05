@@ -7,7 +7,7 @@ from pathlib import Path
 
 from config import settings
 from logging_config import get_logger
-from database import get_database
+# from database import get_database
 
 logger = get_logger("cookie_manager")
 
@@ -22,6 +22,7 @@ class CookieManager:
     async def save_cookies(self, platform: str, cookie_data: str, expires_at: Optional[float] = None) -> bool:
         """Save cookies for a platform."""
         try:
+            from database import get_database
             db = await get_database()
             await db.save_cookies(platform, cookie_data, expires_at)
             self._cookies_cache[platform] = cookie_data
@@ -38,6 +39,7 @@ class CookieManager:
             return self._cookies_cache[platform]
 
         try:
+            from database import get_database
             db = await get_database()
             cookie_data = await db.get_cookies(platform)
             if cookie_data:
@@ -69,6 +71,7 @@ class CookieManager:
     async def list_cookies(self) -> list:
         """List all stored cookies."""
         try:
+            from database import get_database
             db = await get_database()
             return await db.list_cookies()
         except Exception as e:
@@ -78,6 +81,7 @@ class CookieManager:
     async def delete_cookies(self, platform: str) -> bool:
         """Delete cookies for a platform."""
         try:
+            from database import get_database
             db = await get_database()
             async with db.acquire() as conn:
                 await conn.execute("DELETE FROM cookies WHERE platform = $1", platform)
