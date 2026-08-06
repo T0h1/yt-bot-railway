@@ -194,6 +194,7 @@ def _download_audio_sync(url: str, output_dir: str) -> Optional[str]:
 
 def _download_video_sync(url: str, output_dir: str, format_str: str) -> Optional[Dict[str, Any]]:
     """Synchronous video download."""
+    import os
     # Detect platform
     platform = ""
     if "youtube.com" in url or "youtu.be" in url:
