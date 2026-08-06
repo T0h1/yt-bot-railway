@@ -701,48 +701,96 @@ async def send_audio_file(chat_id, context, output_file, info, history_id=None):
 
 # ==================== DOWNLOAD: VIDEO ====================
 def compress_video(input_path, output_path, target_size_mb=48):
-    """Compress video to fit within Telegram's 50MB limit"""
+    """Compress video to fit within Telegram's 50MB limit.
+    
+    Strategy (in order, preferring no quality loss):
+    1. Remux to MP4 with faststart (no re-encode, just container optimization)
+    2. HEVC/H.265 re-encode (50% more efficient than H.264, similar quality)
+    3. H.264 re-encode with calculated bitrate (last resort)
+    """
     try:
-        # Get current size
         file_size = os.path.getsize(input_path)
         target_bytes = target_size_mb * 1024 * 1024
         
         if file_size <= target_bytes:
-            # No compression needed
-            shutil.copy2(str(input_path), str(output_path))
+            # No compression needed, just ensure MP4 with faststart
+            if str(input_path).endswith('.mp4'):
+                shutil.copy2(str(input_path), str(output_path))
+            else:
+                cmd = ['ffmpeg', '-y', '-i', str(input_path), '-c', 'copy',
+                       '-movflags', '+faststart', str(output_path)]
+                subprocess.run(cmd, capture_output=True, timeout=60)
             return True
         
-        # Get video duration for bitrate calculation
-        probe_cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-                    '-of', 'default=noprint_wrappers=1:nokey=1', str(input_path)]
+        # Get video duration and current codec
+        probe_cmd = ['ffprobe', '-v', 'error', '-show_entries',
+                     'format=duration:stream=codec_name,codec_type',
+                     '-of', 'json', str(input_path)]
         result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
-        duration = float(result.stdout.strip()) if result.stdout.strip() else 60
+        probe = json.loads(result.stdout) if result.stdout else {}
+        duration = float(probe.get('format', {}).get('duration', 60))
         
-        # Calculate target bitrate (leave some room for audio)
-        target_bitrate = int((target_bytes * 8) / duration * 0.85)  # 85% for video, 15% for audio
+        # Detect current video codec
+        video_codec = 'h264'
+        for stream in probe.get('streams', []):
+            if stream.get('codec_type') == 'video':
+                video_codec = stream.get('codec_name', 'h264')
+                break
         
-        # Compress with ffmpeg
-        cmd = [
+        # Strategy 1: Remux with faststart (no re-encode, saves container overhead)
+        remux_cmd = [
             'ffmpeg', '-y', '-i', str(input_path),
-            '-c:v', 'libx264',
-            '-b:v', str(target_bitrate),
-            '-preset', 'fast',  # Balance between speed and quality
-            '-c:a', 'aac',
-            '-b:a', '128k',
+            '-c', 'copy', '-movflags', '+faststart',
+            str(output_path)
+        ]
+        result = subprocess.run(remux_cmd, capture_output=True, timeout=120)
+        if result.returncode == 0 and os.path.exists(output_path):
+            remux_size = os.path.getsize(output_path)
+            if remux_size <= target_bytes:
+                logger.info("video_remux_ok", original=file_size // (1024*1024),
+                           compressed=remux_size // (1024*1024))
+                return True
+        
+        # Strategy 2: HEVC/H.265 (50% more efficient, minimal quality loss)
+        target_bitrate = int((target_bytes * 8) / duration * 0.85)
+        hevc_cmd = [
+            'ffmpeg', '-y', '-i', str(input_path),
+            '-c:v', 'libx265', '-crf', '28', '-preset', 'fast',
+            '-b:v', str(target_bitrate), '-maxrate', str(int(target_bitrate * 1.5)),
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac', '-b:a', '128k',
             '-movflags', '+faststart',
             str(output_path)
         ]
+        result = subprocess.run(hevc_cmd, capture_output=True, timeout=600)
+        if result.returncode == 0 and os.path.exists(output_path):
+            hevc_size = os.path.getsize(output_path)
+            if hevc_size <= target_bytes:
+                logger.info("video_hevc_ok", original=file_size // (1024*1024),
+                           compressed=hevc_size // (1024*1024))
+                return True
         
-        result = subprocess.run(cmd, capture_output=True, timeout=300)
+        # Strategy 3: H.264 with calculated bitrate (last resort)
+        h264_cmd = [
+            'ffmpeg', '-y', '-i', str(input_path),
+            '-c:v', 'libx264', '-b:v', str(target_bitrate),
+            '-preset', 'fast',
+            '-c:a', 'aac', '-b:a', '128k',
+            '-movflags', '+faststart',
+            str(output_path)
+        ]
+        result = subprocess.run(h264_cmd, capture_output=True, timeout=600)
         if result.returncode == 0:
             new_size = os.path.getsize(output_path)
-            logger.info(f"Video compressed: {file_size // (1024*1024)}MB -> {new_size // (1024*1024)}MB")
+            logger.info("video_h264_ok", original=file_size // (1024*1024),
+                       compressed=new_size // (1024*1024))
             return True
-        else:
-            logger.error(f"Compression failed: {result.stderr.decode()[:200]}")
-            return False
+        
+        logger.error("video_compress_all_failed")
+        return False
+        
     except Exception as e:
-        logger.error(f"Compression error: {e}")
+        logger.error("video_compress_error", error=str(e))
         return False
 
 async def download_video(url, chat_id, context, quality='best'):
@@ -889,12 +937,45 @@ async def download_video(url, chat_id, context, quality='best'):
 
 # ==================== QUALITY SELECTION (YouTube) ====================
 async def show_quality_menu(url, update, context):
+    """Show quality selection menu with file sizes."""
+    chat_id = update.effective_chat.id
+    
+    # Try to get format info for size estimates
+    size_map = {}
+    try:
+        info = await extract_info_async(url)
+        if info and 'formats' in info:
+            for fmt in info['formats']:
+                height = fmt.get('height')
+                ext = fmt.get('ext', '')
+                filesize = fmt.get('filesize') or fmt.get('filesize_approx', 0)
+                if height and filesize and ext in ('mp4', 'webm'):
+                    key = str(height)
+                    if key not in size_map or filesize > size_map[key]:
+                        size_map[key] = filesize
+    except Exception:
+        pass
+    
+    def fmt_size(size_bytes):
+        """Format bytes to human readable."""
+        if not size_bytes:
+            return ""
+        mb = size_bytes / (1024 * 1024)
+        if mb >= 1:
+            return f" (~{mb:.0f}MB)"
+        return f" (~{mb*1024:.0f}KB)"
+    
+    # Build buttons with sizes
+    def btn(label, height_key, callback_prefix):
+        size = size_map.get(height_key, 0)
+        return InlineKeyboardButton(f"{label}{fmt_size(size)}", callback_data=f"{callback_prefix}|{url[:80]}")
+    
     keyboard = [
-        [InlineKeyboardButton("🎯 بهترین کیفیت", callback_data=f"vq_best|{url[:80]}")],
-        [InlineKeyboardButton("📺 1080p Full HD", callback_data=f"vq_1080p|{url[:80]}"),
-         InlineKeyboardButton("📺 720p HD", callback_data=f"vq_720p|{url[:80]}")],
-        [InlineKeyboardButton("📺 480p", callback_data=f"vq_480p|{url[:80]}"),
-         InlineKeyboardButton("📺 360p", callback_data=f"vq_360p|{url[:80]}")],
+        [btn("🎯 بهترین کیفیت", "best", "vq_best")],
+        [btn("📺 1080p Full HD", "1080", "vq_1080p"),
+         btn("📺 720p HD", "720", "vq_720p")],
+        [btn("📺 480p", "480", "vq_480p"),
+         btn("📺 360p", "360", "vq_360p")],
         [InlineKeyboardButton("🎵 فقط صدا (MP3 320k)", callback_data=f"vq_audio|{url[:80]}")],
     ]
     await update.message.reply_text(
