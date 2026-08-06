@@ -17,6 +17,44 @@ BASE_DIR = Path(__file__).resolve().parent
 _ytdlp_executor: Optional[ThreadPoolExecutor] = None
 
 
+def _find_cookie_file(platform: str = "") -> Optional[str]:
+    """Find cookie file for a platform. Checks multiple locations in order.
+    
+    Priority:
+    1. COOKIE_FILE env var (settings.cookie_file)
+    2. cookie_data/{platform}_cookies.txt (cookie_manager file fallback)
+    3. /tmp/cookies_{platform}.txt (cookie_manager temp files)
+    4. youtube_downloads/cookies.txt (default fallback)
+    """
+    # 1. Check settings.cookie_file (env var)
+    if settings.cookie_file and Path(settings.cookie_file).exists():
+        logger.info("cookie_file_found", source="settings", path=settings.cookie_file)
+        return str(settings.cookie_file)
+    
+    # 2. Check cookie_data/ directory (cookie_manager file fallback)
+    if platform:
+        cookie_data_file = BASE_DIR / "cookie_data" / f"{platform}_cookies.txt"
+        if cookie_data_file.exists():
+            logger.info("cookie_file_found", source="cookie_data", path=str(cookie_data_file))
+            return str(cookie_data_file)
+    
+    # 3. Check /tmp/ (cookie_manager temp files)
+    if platform:
+        tmp_cookie = Path(f"/tmp/cookies_{platform}.txt")
+        if tmp_cookie.exists():
+            logger.info("cookie_file_found", source="tmp", path=str(tmp_cookie))
+            return str(tmp_cookie)
+    
+    # 4. Default fallback
+    default_cookie = BASE_DIR / "youtube_downloads" / "cookies.txt"
+    if default_cookie.exists():
+        logger.info("cookie_file_found", source="default", path=str(default_cookie))
+        return str(default_cookie)
+    
+    logger.warning("cookie_file_not_found", platform=platform)
+    return None
+
+
 def set_executor(executor: ThreadPoolExecutor) -> None:
     """Set the global yt-dlp executor."""
     global _ytdlp_executor
@@ -49,15 +87,7 @@ def _extract_info_sync(url: str, extra_opts: Optional[Dict] = None) -> Optional[
     elif "tiktok.com" in url:
         platform = "tiktok"
 
-    # This runs in thread pool, so we need to run the async cookie getter differently
-    # For now, use the fallback cookie file method
-    cookie_file = None
-    if settings.cookie_file and Path(settings.cookie_file).exists():
-        cookie_file = str(settings.cookie_file)
-    else:
-        default_cookie = BASE_DIR / "youtube_downloads" / "cookies.txt"
-        if default_cookie.exists():
-            cookie_file = str(default_cookie)
+    cookie_file = _find_cookie_file(platform)
 
     opts = {
         'quiet': True,
@@ -82,13 +112,7 @@ def _extract_artist_tracks_sync(url: str) -> Optional[Dict[str, Any]]:
     elif "soundcloud.com" in url:
         platform = "soundcloud"
 
-    cookie_file = None
-    if settings.cookie_file and Path(settings.cookie_file).exists():
-        cookie_file = str(settings.cookie_file)
-    else:
-        default_cookie = BASE_DIR / "youtube_downloads" / "cookies.txt"
-        if default_cookie.exists():
-            cookie_file = str(default_cookie)
+    cookie_file = _find_cookie_file(platform)
 
     opts = {
         'quiet': True,
@@ -157,7 +181,6 @@ def _search_sync(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
 
 def _download_audio_sync(url: str, output_dir: str) -> Optional[str]:
     """Synchronous audio download."""
-    import tempfile
     import os
 
     # Detect platform
@@ -167,13 +190,7 @@ def _download_audio_sync(url: str, output_dir: str) -> Optional[str]:
     elif "soundcloud.com" in url:
         platform = "soundcloud"
 
-    cookie_file = None
-    if settings.cookie_file and Path(settings.cookie_file).exists():
-        cookie_file = str(settings.cookie_file)
-    else:
-        default_cookie = BASE_DIR / "youtube_downloads" / "cookies.txt"
-        if default_cookie.exists():
-            cookie_file = str(default_cookie)
+    cookie_file = _find_cookie_file(platform)
 
     ydl_opts = {
         'outtmpl': os.path.join(output_dir, 'temp_audio.%(ext)s'),
@@ -202,13 +219,7 @@ def _download_video_sync(url: str, output_dir: str, format_str: str) -> Optional
     elif "soundcloud.com" in url:
         platform = "soundcloud"
 
-    cookie_file = None
-    if settings.cookie_file and Path(settings.cookie_file).exists():
-        cookie_file = str(settings.cookie_file)
-    else:
-        default_cookie = BASE_DIR / "youtube_downloads" / "cookies.txt"
-        if default_cookie.exists():
-            cookie_file = str(default_cookie)
+    cookie_file = _find_cookie_file(platform)
 
     ydl_opts = {
         'outtmpl': os.path.join(output_dir, 'temp_video.%(ext)s'),

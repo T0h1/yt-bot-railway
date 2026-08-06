@@ -32,21 +32,15 @@ class CookieManager:
 
     async def save_cookies(self, platform: str, cookie_data: str, expires_at: Optional[float] = None) -> bool:
         """Save cookies for a platform."""
-        if not settings.postgres_dsn:
-            logger.warning("cookies_save_skipped_no_database", platform=platform)
-            self._cookies_cache[platform] = cookie_data
-            # Also save to file as fallback
-            self._save_to_file(platform, cookie_data)
-            return True
         try:
             from database import get_database
             db = await get_database()
-            if not db:
-                self._cookies_cache[platform] = cookie_data
-                self._save_to_file(platform, cookie_data)
-                return True
-            await db.save_cookies(platform, cookie_data, expires_at)
+            if db:
+                from datetime import datetime
+                expires_dt = datetime.fromtimestamp(expires_at) if expires_at else None
+                await db.save_cookies(platform, cookie_data, expires_dt)
             self._cookies_cache[platform] = cookie_data
+            # Always save to file so sync functions can find cookies
             self._save_to_file(platform, cookie_data)
             logger.info("cookies_saved", platform=platform)
             return True
