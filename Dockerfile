@@ -21,16 +21,18 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # Runtime stage - minimal distroless-like image
 FROM python:3.11-slim AS runtime
 
-# Install only runtime dependencies (ffmpeg + libpq for asyncpg + deno for yt-dlp JS challenges)
+# Install only runtime dependencies (ffmpeg + libpq for asyncpg + curl for deno install)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libpq5 \
     unzip \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install deno for yt-dlp YouTube n-challenge solving
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
-    chmod +x /usr/local/bin/deno
+    chmod +x /usr/local/bin/deno && \
+    apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /bin/bash appuser
