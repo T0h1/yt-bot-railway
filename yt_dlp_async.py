@@ -20,35 +20,35 @@ _ytdlp_executor: Optional[ThreadPoolExecutor] = None
 def _find_cookie_file(platform: str = "") -> Optional[str]:
     """Find cookie file for a platform. Checks multiple locations in order.
     
-    Priority:
-    1. COOKIE_FILE env var (settings.cookie_file)
-    2. cookie_data/{platform}_cookies.txt (cookie_manager file fallback)
-    3. /tmp/cookies_{platform}.txt (cookie_manager temp files)
-    4. youtube_downloads/cookies.txt (default fallback)
+    Priority (uploaded cookies always win over defaults):
+    1. COOKIE_FILE env var (settings.cookie_file) — manual override
+    2. cookie_data/{platform}_cookies.txt — uploaded via Telegram /cookie command
+    3. /tmp/cookies_{platform}.txt — temp files from cookie_manager
+    4. youtube_downloads/cookies.txt — built-in default (non-authenticated)
     """
-    # 1. Check settings.cookie_file (env var)
+    # 1. Manual override via env var
     if settings.cookie_file and Path(settings.cookie_file).exists():
         logger.info("cookie_file_found", source="settings", path=settings.cookie_file)
         return str(settings.cookie_file)
     
-    # 2. Check cookie_data/ directory (cookie_manager file fallback)
+    # 2. Uploaded cookies via /cookie command (highest priority for user cookies)
     if platform:
         cookie_data_file = BASE_DIR / "cookie_data" / f"{platform}_cookies.txt"
         if cookie_data_file.exists():
-            logger.info("cookie_file_found", source="cookie_data", path=str(cookie_data_file))
+            logger.info("cookie_file_found", source="uploaded", path=str(cookie_data_file))
             return str(cookie_data_file)
     
-    # 3. Check /tmp/ (cookie_manager temp files)
+    # 3. Temp files from cookie_manager
     if platform:
         tmp_cookie = Path(f"/tmp/cookies_{platform}.txt")
         if tmp_cookie.exists():
             logger.info("cookie_file_found", source="tmp", path=str(tmp_cookie))
             return str(tmp_cookie)
     
-    # 4. Default fallback
+    # 4. Built-in default (non-authenticated, last resort)
     default_cookie = BASE_DIR / "youtube_downloads" / "cookies.txt"
     if default_cookie.exists():
-        logger.info("cookie_file_found", source="default", path=str(default_cookie))
+        logger.info("cookie_file_found", source="default_fallback", path=str(default_cookie))
         return str(default_cookie)
     
     logger.warning("cookie_file_not_found", platform=platform)
