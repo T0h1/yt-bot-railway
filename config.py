@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     spotify_client_id: str = Field(default="", description="Spotify API Client ID")
     spotify_client_secret: str = Field(default="", description="Spotify API Client Secret")
     cookie_file: str = Field(default="", description="Path to cookies file for yt-dlp")
+    admin_api_key: str = Field(default="", description="API key for admin dashboard", validation_alias="ADMIN_API_KEY")
 
     # Optional: Railway public domain for webhook
     railway_public_domain: str = Field(

@@ -104,9 +104,17 @@ class Database:
                     platform TEXT NOT NULL UNIQUE,
                     cookie_data TEXT NOT NULL,
                     user_agent TEXT,
+                    expires_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 )
+            """)
+            # Add expires_at column if missing (for existing databases)
+            await conn.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE cookies ADD COLUMN expires_at TIMESTAMPTZ;
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$
             """)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS playlists (
@@ -202,6 +210,41 @@ class Database:
         """Clear user state."""
         async with self.acquire() as conn:
             await conn.execute("DELETE FROM user_states WHERE user_id = $1", user_id)
+
+    # Cookie methods
+    async def save_cookies(self, platform: str, cookie_data: str, expires_at=None) -> None:
+        """Save or update cookies for a platform."""
+        async with self.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO cookies (platform, cookie_data, expires_at, created_at, updated_at)
+                VALUES ($1, $2, $3, NOW(), NOW())
+                ON CONFLICT (platform) DO UPDATE SET
+                    cookie_data = EXCLUDED.cookie_data,
+                    expires_at = EXCLUDED.expires_at,
+                    updated_at = NOW()
+            """, platform, cookie_data, expires_at)
+
+    async def get_cookies(self, platform: str) -> Optional[str]:
+        """Get cookie data for a platform."""
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT cookie_data FROM cookies WHERE platform = $1", platform
+            )
+            if row:
+                return row["cookie_data"]
+            return None
+
+    async def list_cookies(self) -> List[dict]:
+        """List all stored cookies."""
+        async with self.acquire() as conn:
+            rows = await conn.fetch("SELECT * FROM cookies ORDER BY updated_at DESC")
+            return [dict(r) for r in rows]
+
+    async def delete_cookies(self, platform: str) -> bool:
+        """Delete cookies for a platform."""
+        async with self.acquire() as conn:
+            result = await conn.execute("DELETE FROM cookies WHERE platform = $1", platform)
+            return result == "DELETE 1"
 
     # Playlist methods with lazy import to avoid circular dependency
     async def save_playlist(self, playlist) -> None:

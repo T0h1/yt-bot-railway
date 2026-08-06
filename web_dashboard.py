@@ -30,11 +30,20 @@ templates = Jinja2Templates(directory="templates")
 # Auth dependency
 async def verify_admin(request: Request) -> bool:
     """Verify admin access via token or session."""
+    # If no API key configured, allow all requests (dev mode)
+    if not settings.admin_api_key:
+        return True
+
     # Check for API key in header
     api_key = request.headers.get("X-API-Key")
     if api_key and api_key == settings.admin_api_key:
         return True
-    
+
+    # Check for API key in query parameter
+    api_key = request.query_params.get("api_key")
+    if api_key and api_key == settings.admin_api_key:
+        return True
+
     # Check session
     # For simplicity, we'll use a token-based approach
     # In production, use proper session management
@@ -189,7 +198,13 @@ async def update_user(user_id: int, update: UserUpdate, _: bool = Depends(verify
 async def get_cookies(_: bool = Depends(verify_admin)):
     db = await get_db_or_404()
     cookies = await db.list_cookies()
-    return [CookieResponse(**c) for c in cookies]
+    result = []
+    for c in cookies:
+        # Convert datetime to ISO string for Pydantic
+        if c.get("expires_at") and hasattr(c["expires_at"], "isoformat"):
+            c["expires_at"] = c["expires_at"].isoformat()
+        result.append(CookieResponse(**c))
+    return result
 
 
 @app.post("/api/cookies", response_model=CookieResponse)
@@ -201,12 +216,15 @@ async def create_cookie(cookie: CookieCreate, _: bool = Depends(verify_admin)):
     await db.save_cookies(cookie.platform, cookie.cookie_data, expires)
     cookies = await db.list_cookies()
     c = next((c for c in cookies if c["platform"] == cookie.platform), None)
+    if c and c.get("expires_at") and hasattr(c["expires_at"], "isoformat"):
+        c["expires_at"] = c["expires_at"].isoformat()
     return CookieResponse(**c)
 
 
 @app.delete("/api/cookies/{platform}")
 async def delete_cookie(platform: str, _: bool = Depends(verify_admin)):
-    # No delete method in database yet, just return success
+    db = await get_db_or_404()
+    await db.delete_cookies(platform)
     return {"message": f"Cookie for {platform} deleted"}
 
 
