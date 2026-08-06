@@ -21,7 +21,7 @@ class Settings(BaseSettings):
         default=20, description="Target video size in MB for compression"
     )
     max_video_duration_sec: int = Field(
-        default=300, description="Max video duration in seconds (Railway mode)"
+        default=0, description="Max video duration in seconds (0 = no limit)"
     )
     max_storage_mb: int = Field(default=400, description="Max storage in MB before cleanup")
 
