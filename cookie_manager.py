@@ -11,6 +11,7 @@ from config import settings
 from logging_config import get_logger
 
 logger = get_logger("cookie_manager")
+BASE_DIR = Path(__file__).resolve().parent
 
 # ==================== DEFAULT COOKIE (for when no cookie is uploaded) ====================
 DEFAULT_YOUTUBE_COOKIE = """# Netscape HTTP Cookie File
@@ -51,7 +52,7 @@ class CookieManager:
     def _save_to_file(self, platform: str, cookie_data: str):
         """Save cookies to file as fallback when no database."""
         try:
-            cookie_dir = Path("cookie_data")
+            cookie_dir = BASE_DIR / "cookie_data"
             cookie_dir.mkdir(exist_ok=True)
             cookie_file = cookie_dir / f"{platform}_cookies.txt"
             cookie_file.write_text(cookie_data)
@@ -61,7 +62,7 @@ class CookieManager:
     def _load_from_file(self, platform: str) -> Optional[str]:
         """Load cookies from file fallback."""
         try:
-            cookie_file = Path("cookie_data") / f"{platform}_cookies.txt"
+            cookie_file = BASE_DIR / "cookie_data" / f"{platform}_cookies.txt"
             if cookie_file.exists():
                 return cookie_file.read_text()
         except Exception:
@@ -147,7 +148,7 @@ class CookieManager:
                 await db.delete_cookies(platform)
             self._cookies_cache.pop(platform, None)
             # Also delete file
-            cookie_file = Path("cookie_data") / f"{platform}_cookies.txt"
+            cookie_file = BASE_DIR / "cookie_data" / f"{platform}_cookies.txt"
             if cookie_file.exists():
                 cookie_file.unlink()
             logger.info("cookies_deleted", platform=platform)
