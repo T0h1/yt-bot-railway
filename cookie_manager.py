@@ -33,6 +33,11 @@ class CookieManager:
 
     async def save_cookies(self, platform: str, cookie_data: str, expires_at: Optional[float] = None) -> bool:
         """Save cookies for a platform."""
+        # Always save to file first (sync functions need this)
+        self._save_to_file(platform, cookie_data)
+        self._cookies_cache[platform] = cookie_data
+
+        # Try to save to database too
         try:
             from database import get_database
             db = await get_database()
@@ -40,14 +45,11 @@ class CookieManager:
                 from datetime import datetime
                 expires_dt = datetime.fromtimestamp(expires_at) if expires_at else None
                 await db.save_cookies(platform, cookie_data, expires_dt)
-            self._cookies_cache[platform] = cookie_data
-            # Always save to file so sync functions can find cookies
-            self._save_to_file(platform, cookie_data)
-            logger.info("cookies_saved", platform=platform)
-            return True
         except Exception as e:
-            logger.error("cookies_save_failed", platform=platform, error=str(e))
-            return False
+            logger.warning("cookies_db_save_failed", platform=platform, error=str(e))
+
+        logger.info("cookies_saved", platform=platform, source="file+cache")
+        return True
 
     def _save_to_file(self, platform: str, cookie_data: str):
         """Save cookies to file as fallback when no database."""
