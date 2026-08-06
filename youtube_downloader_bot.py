@@ -585,7 +585,7 @@ def create_preview(input_path, output_path, duration=30):
 async def download_audio(url, chat_id, context, title_override=None, progress_msg_id=None):
     resolved = resolve_short_url(url)
     try:
-        info = await asyncio.get_event_loop().run_in_executor(None, extract_info_sync, resolved)
+        info = await extract_info_async(resolved)
         if not info:
             return None, "اطلاعات آهنگ یافت نشد"
 
