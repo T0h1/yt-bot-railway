@@ -53,6 +53,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = BASE_DIR / "media_downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 COOKIE_FILE = BASE_DIR / "youtube_downloads" / "cookies.txt"
+DB_PATH = BASE_DIR / "bot.db"
 
 # Async yt-dlp executor (controlled thread pool)
 YTDLP_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="yt-dlp")
