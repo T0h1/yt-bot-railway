@@ -6,6 +6,7 @@ import json
 import shutil
 import asyncio
 import signal
+import sqlite3
 import subprocess
 import urllib.request
 from pathlib import Path
