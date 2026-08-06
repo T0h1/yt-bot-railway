@@ -39,7 +39,7 @@ from lyrics_lrc import fetch_synced_lyrics, embed_synced_lyrics_mp3
 from health_check import start_health_server, stop_health_server
 from database import get_database, close_database
 from download_queue import get_download_queue, close_download_queue, DownloadTask, DownloadStatus
-from cookie_manager import get_cookie_manager
+from cookie_manager import get_cookie_manager, convert_cookies, detect_cookie_format
 from metrics import init_metrics, record_download, record_error, set_active_downloads, set_queue_stats, record_rate_limit, setup_metrics_app
 from chunked_upload import upload_with_progress
 
@@ -984,6 +984,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     data = query.data
 
+    # Cookie-related callbacks
+    if data.startswith("cookie_set|") or data.startswith("cookie_del|"):
+        if await handle_cookie_callback(query, chat_id, data, context):
+            return
+
     # Video quality selection
     if data.startswith("vq_"):
         parts = data.split("|", 1)
@@ -1150,6 +1155,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "📌 **دستورات:**\n"
         "`/search <نام>` — جستجوی آرتیست\n"
+        "`/cookie` — آپلود کوکی\n"
+        "`/removecookie` — حذف کوکی\n"
         "`/history` — تاریخچه دانلودها\n"
         "`/favorites` — آهنگ‌های مورد علاقه\n"
         "`/albums` — آلبوم‌ها\n"
@@ -1177,7 +1184,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "**پلتفرم‌ها:**\n"
         "✅ YouTube, SoundCloud, Spotify (artist/playlist)\n"
         "✅ Instagram, TikTok, Twitter/X\n"
-        "✅ Facebook, Twitch",
+        "✅ Facebook, Twitch\n\n"
+        "🍪 **کوکی:** `/cookie` — آپلود کوکی برای دور زدن محدودیت YouTube",
         parse_mode='Markdown'
     )
 
@@ -1286,9 +1294,238 @@ async def cmd_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"{emoji} {title} [{platform}] — {ts}\n"
     await update.message.reply_text(text, parse_mode='Markdown')
 
+# ==================== COOKIE UPLOAD STATE ====================
+# Track users waiting to upload cookie file: {chat_id: {'platform': str}}
+_cookie_upload_state: dict = {}
+
+# Platform buttons for cookie upload
+_COOKIE_PLATFORMS = [
+    ("🎬 YouTube", "youtube"),
+    ("🎵 SoundCloud", "soundcloud"),
+    ("📸 Instagram", "instagram"),
+    ("🎵 TikTok", "tiktok"),
+    ("🐦 Twitter / X", "twitter"),
+    ("📺 Facebook", "facebook"),
+]
+
+async def cmd_cookie(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /cookie command — show platform selection."""
+    if ADMIN_ID and update.effective_user.id != ADMIN_ID:
+        return
+    keyboard = []
+    row = []
+    for label, slug in _COOKIE_PLATFORMS:
+        row.append(InlineKeyboardButton(label, callback_data=f"cookie_set|{slug}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    await update.message.reply_text(
+        "🍪 **آپلود کوکی**\n\n"
+        "پلتفرم مورد نظر رو انتخاب کن:\n"
+        "بعد فایل کوکی رو بفرست (فرمت‌های Netscape، Cookie-Editor JSON، "
+        "EditThisCookie JSON، یا HTTP Cookie header)",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+async def cmd_removecookie(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /removecookie — delete stored cookies for a platform."""
+    if ADMIN_ID and update.effective_user.id != ADMIN_ID:
+        return
+    manager = get_cookie_manager()
+    # Check args
+    if context.args:
+        platform = context.args[0].lower()
+        ok = await manager.delete_cookies(platform)
+        if ok:
+            await update.message.reply_text(f"🗑 کوکی {platform} حذف شد.")
+        else:
+            await update.message.reply_text(f"❌ خطا در حذف کوکی {platform}.")
+        return
+
+    keyboard = []
+    row = []
+    for label, slug in _COOKIE_PLATFORMS:
+        row.append(InlineKeyboardButton(label, callback_data=f"cookie_del|{slug}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    await update.message.reply_text(
+        "🗑 **حذف کوکی**\n\nپلتفرم رو انتخاب کن:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+async def handle_cookie_callback(query, chat_id, data, context):
+    """Handle cookie-related inline button callbacks."""
+    # Platform selected for upload
+    if data.startswith("cookie_set|"):
+        platform = data.split("|", 1)[1]
+        _cookie_upload_state[chat_id] = {"platform": platform}
+        await query.edit_message_text(
+            f"🍪 **آپلود کوکی — {platform}**\n\n"
+            "فایل کوکی رو بفرست:\n"
+            "• فایل `.txt` یا `.json`\n"
+            "• یا متن کوکی رو مستقیم پیست کن\n\n"
+            "فرمت‌های پشتیبانی شده:\n"
+            "✅ Netscape (Get cookies.txt LOCALLY)\n"
+            "✅ Cookie-Editor JSON\n"
+            "✅ EditThisCookie JSON\n"
+            "✅ HTTP Cookie header\n\n"
+            "❌ `/cancel` برای لغو",
+            parse_mode='Markdown',
+        )
+        return True
+
+    # Platform selected for deletion
+    if data.startswith("cookie_del|"):
+        platform = data.split("|", 1)[1]
+        manager = get_cookie_manager()
+        ok = await manager.delete_cookies(platform)
+        if ok:
+            await query.edit_message_text(f"🗑 کوکی {platform} حذف شد.")
+        else:
+            await query.edit_message_text(f"❌ خطا در حذف کوکی {platform}.")
+        return True
+
+    return False
+
+async def _process_cookie_upload(update: Update, context: ContextTypes.DEFAULT_TYPE, content: str, filename: str = ""):
+    """Process uploaded cookie content (from file or text)."""
+    chat_id = update.effective_chat.id
+    state = _cookie_upload_state.get(chat_id)
+    if not state:
+        return False
+
+    platform = state["platform"]
+    status_msg = await update.message.reply_text("🔄 در حال پردازش کوکی...")
+
+    # Convert to Netscape format
+    success, result = convert_cookies(content, platform)
+
+    if not success:
+        await status_msg.edit_text(
+            f"❌ **خطا در پردازش کوکی:**\n\n{result}\n\n"
+            "فرمت‌های پشتیبانی شده:\n"
+            "• Netscape (Get cookies.txt LOCALLY)\n"
+            "• Cookie-Editor JSON\n"
+            "• EditThisCookie JSON\n"
+            "• HTTP Cookie header (key=value; key=value)",
+            parse_mode='Markdown',
+        )
+        return True
+
+    # Count cookies
+    cookie_count = sum(1 for line in result.split('\n')
+                       if line.strip() and not line.strip().startswith('#'))
+
+    # Validate and save
+    manager = get_cookie_manager()
+    ok, msg = await manager.validate_and_save(platform, result)
+
+    if ok:
+        await status_msg.edit_text(
+            f"✅ **کوکی ذخیره شد!**\n\n"
+            f"📡 پلتفرم: `{platform}`\n"
+            f"🍪 تعداد کوکی‌ها: {cookie_count}\n"
+            f"📁 فرمت: Netscape\n\n"
+            f"از این به بعد دانلودها با کوکی انجام میشه.",
+            parse_mode='Markdown',
+        )
+    else:
+        await status_msg.edit_text(
+            f"❌ **خطا:** {msg}",
+            parse_mode='Markdown',
+        )
+
+    # Clear state
+    _cookie_upload_state.pop(chat_id, None)
+    return True
+
+async def handle_cookie_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle document uploads when user is in cookie upload state."""
+    chat_id = update.effective_chat.id
+    if chat_id not in _cookie_upload_state:
+        return False
+
+    doc = update.message.document
+    if not doc:
+        return False
+
+    # Validate file type
+    filename = doc.file_name or ""
+    valid_exts = ('.txt', '.json', '.sqlite', '.sqlite3', '.db', '.cookie', '.cookies')
+    if not any(filename.lower().endswith(ext) for ext in valid_exts):
+        await update.message.reply_text(
+            "❌ فرمت فایل نامعتبره.\n"
+            "فایل‌های مجاز: `.txt`, `.json`, `.sqlite`, `.db`",
+            parse_mode='Markdown',
+        )
+        return True
+
+    # Download file
+    status_msg = await update.message.reply_text("📥 دریافت فایل...")
+    try:
+        file = await context.bot.get_file(doc.file_id)
+        content = await file.download_as_bytearray()
+        raw_content = content.decode('utf-8', errors='replace')
+    except Exception as e:
+        await status_msg.edit_text(f"❌ خطا در دانلود فایل: {e}")
+        return True
+
+    await status_msg.delete()
+    return await _process_cookie_upload(update, context, raw_content, filename)
+
+async def handle_cookie_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text messages when user is in cookie upload state."""
+    chat_id = update.effective_chat.id
+    if chat_id not in _cookie_upload_state:
+        return False
+
+    text = update.message.text
+    if not text:
+        return False
+
+    # /cancel to abort
+    if text.strip().lower() == '/cancel':
+        _cookie_upload_state.pop(chat_id, None)
+        await update.message.reply_text("🚫 آپلود کوکی لغو شد.")
+        return True
+
+    # Must look like cookie data (key=value or JSON)
+    is_cookie = (
+        '=' in text and ';' in text  # HTTP header format
+        or text.strip().startswith('[')  # JSON array
+        or text.strip().startswith('{')  # JSON object
+        or '\t' in text  # Netscape format
+    )
+    if not is_cookie:
+        await update.message.reply_text(
+            "🤔 این به نظر کوکی نمیاد.\n"
+            "لطفاً فایل کوکی رو بفرست یا متن کوکی رو پیست کن.\n\n"
+            "❌ `/cancel` برای لغو",
+            parse_mode='Markdown',
+        )
+        return True
+
+    return await _process_cookie_upload(update, context, text)
+
 # ==================== MAIN MESSAGE HANDLER ====================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    
+    # Check if user is in cookie upload state — handle cookie text input
+    if chat_id in _cookie_upload_state:
+        handled = await handle_cookie_text(update, context)
+        if handled:
+            return
     
     # Check if user is allowed (if ALLOWED_USERS is configured)
     if ALLOWED_USERS and user_id not in ALLOWED_USERS:
@@ -1532,7 +1769,11 @@ async def main():
     app.add_handler(CommandHandler("albums", cmd_albums))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("logs", cmd_logs))
+    app.add_handler(CommandHandler("cookie", cmd_cookie))
+    app.add_handler(CommandHandler("removecookie", cmd_removecookie))
     app.add_handler(CallbackQueryHandler(button_callback))
+    # Document handler for cookie upload (must be before text handler)
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_cookie_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Start background tasks
