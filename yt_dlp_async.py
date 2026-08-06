@@ -37,6 +37,8 @@ def _find_cookie_file(platform: str = "") -> Optional[str]:
         if cookie_data_file.exists():
             logger.info("cookie_file_found", source="uploaded", path=str(cookie_data_file))
             return str(cookie_data_file)
+        else:
+            logger.warning("cookie_file_not_in_cookie_data", platform=platform, expected_path=str(cookie_data_file), base_dir=str(BASE_DIR))
     
     # 3. Temp files from cookie_manager
     if platform:
@@ -51,7 +53,7 @@ def _find_cookie_file(platform: str = "") -> Optional[str]:
         logger.info("cookie_file_found", source="default_fallback", path=str(default_cookie))
         return str(default_cookie)
     
-    logger.warning("cookie_file_not_found", platform=platform)
+    logger.warning("cookie_file_not_found", platform=platform, base_dir=str(BASE_DIR))
     return None
 
 

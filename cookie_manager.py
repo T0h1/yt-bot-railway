@@ -55,11 +55,12 @@ class CookieManager:
         """Save cookies to file as fallback when no database."""
         try:
             cookie_dir = BASE_DIR / "cookie_data"
-            cookie_dir.mkdir(exist_ok=True)
+            cookie_dir.mkdir(parents=True, exist_ok=True)
             cookie_file = cookie_dir / f"{platform}_cookies.txt"
             cookie_file.write_text(cookie_data)
+            logger.info("cookie_file_saved", platform=platform, path=str(cookie_file), size=len(cookie_data))
         except Exception as e:
-            logger.error("cookie_file_save_failed", platform=platform, error=str(e))
+            logger.error("cookie_file_save_failed", platform=platform, path=str(BASE_DIR / "cookie_data"), error=str(e))
 
     def _load_from_file(self, platform: str) -> Optional[str]:
         """Load cookies from file fallback."""
