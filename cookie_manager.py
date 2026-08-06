@@ -33,6 +33,14 @@ class CookieManager:
 
     async def save_cookies(self, platform: str, cookie_data: str, expires_at: Optional[float] = None) -> bool:
         """Save cookies for a platform."""
+        # Defensive: ensure cookie_data is a string
+        if isinstance(cookie_data, dict):
+            cookie_data = cookie_data.get("cookie_data", "")
+        cookie_data = str(cookie_data) if cookie_data else ""
+        if not cookie_data:
+            logger.warning("save_cookies_empty", platform=platform)
+            return False
+
         # Always save to file first (sync functions need this)
         self._save_to_file(platform, cookie_data)
         self._cookies_cache[platform] = cookie_data
@@ -76,7 +84,10 @@ class CookieManager:
         """Get cookies for a platform."""
         # Check cache first
         if platform in self._cookies_cache:
-            return self._cookies_cache[platform]
+            val = self._cookies_cache[platform]
+            if isinstance(val, dict):
+                return val.get("cookie_data", "")
+            return str(val) if val else None
 
         # Check file fallback
         file_cookies = self._load_from_file(platform)
@@ -99,8 +110,13 @@ class CookieManager:
                 return None
             cookie_data = await db.get_cookies(platform)
             if cookie_data:
-                self._cookies_cache[platform] = cookie_data
-                return cookie_data
+                # Defensive: ensure it's a string
+                if isinstance(cookie_data, dict):
+                    cookie_data = cookie_data.get("cookie_data", "")
+                cookie_data = str(cookie_data) if cookie_data else ""
+                if cookie_data:
+                    self._cookies_cache[platform] = cookie_data
+                    return cookie_data
             # Return default for youtube
             if platform.lower() in ('youtube', 'youtube.com'):
                 return DEFAULT_YOUTUBE_COOKIE
@@ -117,8 +133,15 @@ class CookieManager:
         if not cookie_data:
             return None
 
+        # Defensive: ensure cookie_data is a string
+        if isinstance(cookie_data, dict):
+            cookie_data = cookie_data.get("cookie_data", "")
+        cookie_data = str(cookie_data) if cookie_data else ""
+        if not cookie_data:
+            return None
+
         # Create temp cookie file
-        temp_dir = Path(settings.cookie_file).parent if settings.cookie_file else Path("/tmp")
+        temp_dir = Path("/tmp")
         temp_dir.mkdir(parents=True, exist_ok=True)
 
         cookie_file = temp_dir / f"cookies_{platform}.txt"
