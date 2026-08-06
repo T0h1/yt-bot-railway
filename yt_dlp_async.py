@@ -211,8 +211,8 @@ def _download_audio_sync(url: str, output_dir: str) -> Optional[str]:
     return None
 
 
-def _download_video_sync(url: str, output_dir: str, format_str: str) -> Optional[Dict[str, Any]]:
-    """Synchronous video download."""
+def _download_video_sync(url: str, output_dir: str, format_str: str) -> Optional[str]:
+    """Synchronous video download. Returns file path or None."""
     import os
     # Detect platform
     platform = ""
@@ -231,7 +231,13 @@ def _download_video_sync(url: str, output_dir: str, format_str: str) -> Optional
         'cookiefile': cookie_file,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        return ydl.extract_info(url, download=True)
+        ydl.download([url])
+
+    # Find downloaded file
+    for f in os.listdir(output_dir):
+        if f.startswith('temp_video.') and os.path.isfile(os.path.join(output_dir, f)):
+            return os.path.join(output_dir, f)
+    return None
 
 
 # Async wrappers
@@ -259,7 +265,7 @@ async def download_audio_async(url: str, output_dir: str) -> Optional[str]:
     return await loop.run_in_executor(get_executor(), _download_audio_sync, url, output_dir)
 
 
-async def download_video_async(url: str, output_dir: str, format_str: str) -> Optional[Dict[str, Any]]:
-    """Async wrapper for video download."""
+async def download_video_async(url: str, output_dir: str, format_str: str) -> Optional[str]:
+    """Async wrapper for video download. Returns file path or None."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(get_executor(), _download_video_sync, url, output_dir, format_str)
