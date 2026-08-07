@@ -9,6 +9,7 @@ import signal
 import sqlite3
 import subprocess
 import urllib.request
+import html
 from pathlib import Path
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, urlunparse
@@ -582,7 +583,8 @@ def fetch_lyrics_sync(artist, title):
 
     # Source 3: Genius API (scrape search page)
     try:
-        search_url = f"https://genius.com/api/search?q={artist_clean}%20{title_clean}"
+        # Genius prefers "title artist" over "artist title"
+        search_url = f"https://genius.com/api/search?q={title_clean}%20{artist_clean}"
         resp = req_lib.get(search_url, timeout=10, headers=headers)
         if resp.status_code == 200:
             data = resp.json()
@@ -592,15 +594,21 @@ def fetch_lyrics_sync(artist, title):
                 if song_url:
                     resp2 = req_lib.get(song_url, timeout=10, headers=headers)
                     if resp2.status_code == 200:
-                        match = re.search(r'<div[^>]*data-lyrics-container="true"[^>]*>(.*?)</div>', resp2.text, re.DOTALL)
-                        if match:
-                            lyrics_html = match.group(1)
-                            lyrics = re.sub(r'<br\s*/?>', '\n', lyrics_html)
-                            lyrics = re.sub(r'<[^>]+>', '', lyrics)
-                            lyrics = html.unescape(lyrics).strip()
-                            if len(lyrics) > 20:
-                                logger.info(f"Lyrics found from Genius: {len(lyrics)} chars")
-                                return lyrics[:4000]
+                        # Get ALL lyric containers and pick the longest one
+                        containers = re.findall(
+                            r'data-lyrics-container="true"[^>]*>(.*?)</div>',
+                            resp2.text, re.DOTALL
+                        )
+                        best_lyrics = ""
+                        for container in containers:
+                            cleaned = re.sub(r'<br\s*/?>', '\n', container)
+                            cleaned = re.sub(r'<[^>]+>', '', cleaned)
+                            cleaned = html.unescape(cleaned).strip()
+                            if len(cleaned) > len(best_lyrics):
+                                best_lyrics = cleaned
+                        if len(best_lyrics) > 20:
+                            logger.info(f"Lyrics found from Genius: {len(best_lyrics)} chars")
+                            return best_lyrics[:4000]
     except Exception as e:
         logger.debug(f"Genius failed: {e}")
 
