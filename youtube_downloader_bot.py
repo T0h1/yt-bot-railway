@@ -603,23 +603,29 @@ def fetch_lyrics_sync(artist, title):
                 if song_url:
                     resp2 = req_lib.get(song_url, timeout=10, headers=headers)
                     if resp2.status_code == 200:
-                        # Get ALL lyric containers and JOIN them (lyrics split across divs)
-                        containers = re.findall(
-                            r'data-lyrics-container="true"[^>]*>(.*?)</div>',
-                            resp2.text, re.DOTALL
-                        )
+                        # Get text between each data-lyrics-container and the next one
+                        # This handles nested divs that old regex missed
+                        container_pattern = r'data-lyrics-container="true"[^>]*>(.*?)(?=data-lyrics-container|<footer|SongFooter)'
+                        matches = re.findall(container_pattern, resp2.text, re.DOTALL)
                         all_parts = []
-                        for container in containers:
-                            cleaned = re.sub(r'<br\s*/?>', '\n', container)
+                        for m in matches:
+                            cleaned = re.sub(r'<br\s*/?>', '\n', m)
                             cleaned = re.sub(r'<[^>]+>', '', cleaned)
                             cleaned = html.unescape(cleaned).strip()
-                            # Skip tiny fragments (headers, ads, empty)
-                            if len(cleaned) > 5:
+                            # Remove header junk
+                            cleaned = re.sub(r'\d+\s*Contributors?\s*\w*\s*Lyrics?', '', cleaned).strip()
+                            cleaned = re.sub(r'\[متن آهنگ.*?\]', '', cleaned).strip()
+                            cleaned = re.sub(r'^Lyrics\s*', '', cleaned).strip()
+                            # Remove "You might also like" ad sections
+                            cleaned = re.sub(r'You might also like.*$', '', cleaned, flags=re.DOTALL).strip()
+                            # Remove Genius footer junk
+                            cleaned = re.sub(r'Embed.*$', '', cleaned, flags=re.DOTALL).strip()
+                            cleaned = re.sub(r'Cancel.*$', '', cleaned, flags=re.DOTALL).strip()
+                            cleaned = re.sub(r'How to Format.*$', '', cleaned, flags=re.DOTALL).strip()
+                            # Skip if only whitespace/short garbage
+                            if cleaned and len(cleaned) > 3 and not cleaned.startswith('<'):
                                 all_parts.append(cleaned)
                         if all_parts:
-                            # Skip first container if it's just "N Contributors"
-                            if len(all_parts[0]) < 50 and 'Contributor' in all_parts[0]:
-                                all_parts = all_parts[1:]
                             best_lyrics = '\n\n'.join(all_parts)
                             if len(best_lyrics) > 20:
                                 logger.info(f"Lyrics found from Genius: {len(best_lyrics)} chars ({len(all_parts)} parts)")
