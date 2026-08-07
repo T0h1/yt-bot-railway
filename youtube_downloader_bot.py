@@ -1014,7 +1014,7 @@ async def show_quality_menu(url, update, context):
     # Build buttons with sizes
     def btn(label, height_key, callback_prefix):
         size = size_map.get(height_key, 0)
-        return InlineKeyboardButton(f"{label}{fmt_size(size)}", callback_data=f"{callback_prefix}|{url[:80]}")
+        return InlineKeyboardButton(f"{label}{fmt_size(size)}", callback_data=callback_prefix)
     
     keyboard = [
         [btn("🎯 بهترین کیفیت", "best", "vq_best")],
@@ -1022,7 +1022,7 @@ async def show_quality_menu(url, update, context):
          btn("📺 720p HD", "720", "vq_720p")],
         [btn("📺 480p", "480", "vq_480p"),
          btn("📺 360p", "360", "vq_360p")],
-        [InlineKeyboardButton("🎵 فقط صدا (MP3 320k)", callback_data=f"vq_audio|{url[:80]}")],
+        [InlineKeyboardButton("🎵 فقط صدا (MP3 320k)", callback_data="vq_audio")],
     ]
     await update.message.reply_text(
         "🎬 **انتخاب کیفیت ویدئو:**\n\nلینک شناسایی شد. کیفیت مورد نظر رو انتخاب کن:",
@@ -1119,12 +1119,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Video quality selection
     if data.startswith("vq_"):
-        parts = data.split("|", 1)
-        quality = parts[0].replace("vq_", "")
-        url = parts[1] if len(parts) > 1 else ""
+        quality = data.replace("vq_", "")
+        session = user_sessions.get(chat_id, {})
+        url = session.get('pending_video_url', '')
         if not url:
-            session = user_sessions.get(chat_id, {})
-            url = session.get('pending_video_url', '')
+            await query.edit_message_text("❌ لینک یافت نشد. دوباره لینک بفرستید.")
+            return
         await query.edit_message_text(f"⏳ در حال دانلود ({quality})...")
         if quality == 'audio':
             output_file, err = await download_audio(url, chat_id, context)
