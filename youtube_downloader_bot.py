@@ -360,29 +360,46 @@ def download_cover(url, output_path):
 def embed_metadata_ffmpeg(input_path, output_path, info, lyrics=None):
     title = info.get('title', 'Unknown')
     artist = info.get('artist') or info.get('uploader', 'Unknown')
-    album = info.get('album') or info.get('playlist_title', '') or info.get('series', '')
-    genre = info.get('genre') or info.get('categories', [''])[0] if info.get('categories') else ''
-    thumbnail = info.get('thumbnail')
-    input_ext = Path(input_path).suffix.lower()
+    # Split artist field - remove "feat." etc
+    artist_seps = re.split(r'[,،;]', artist)
+    if len(artist_seps) > 1:
+        artist = artist_seps[0].strip()
     
-    # Smart genre detection from tags/categories
+    # Get album - try multiple sources, exclude junk values
+    album = info.get('album') or ''
+    playlist = info.get('playlist_title') or ''
+    series = info.get('series') or ''
+    # Use playlist as album only if it looks like an album (not a channel name)
+    if not album and playlist and playlist.lower() not in ('', 'unknown', 'youtube', 'telegram', 'music'):
+        album = playlist
+    if not album and series:
+        album = series
+    # Try tags for album
+    if not album:
+        for tag in (info.get('tags') or []):
+            tag_lower = tag.lower()
+            if 'album' in tag_lower or 'ep' in tag_lower or 'mixtape' in tag_lower:
+                album = tag
+                break
+    
+    # Genre detection
+    genre = info.get('genre') or ''
     if not genre:
-        tags = info.get('tags', [])
-        categories = info.get('categories', [])
+        categories = info.get('categories', []) or []
+        tags = info.get('tags', []) or []
         all_tags = [t.lower() for t in (tags + categories)]
         genre_map = {
-            'hip hop': ['hip-hop', 'hip hop', 'rap', 'hiphop'],
-            'pop': ['pop', 'pop music'],
+            'hip-hop': ['hip-hop', 'hip hop', 'rap', 'hiphop', 'persian rap', 'iranian rap', 'farsi rap'],
+            'pop': ['pop', 'pop music', 'persian pop'],
             'rock': ['rock', 'alternative', 'indie'],
             'electronic': ['electronic', 'edm', 'dance', 'house', 'techno', 'trance'],
             'r&b': ['r&b', 'rnb', 'rhythm and blues', 'soul'],
             'jazz': ['jazz', 'blues'],
-            'classical': ['classical', 'orchestra', 'symphony'],
-            'metal': ['metal', 'heavy metal', 'death metal'],
-            'reggae': ['reggae', 'ska', 'dancehall'],
+            'classical': ['classical', 'orchestra'],
+            'metal': ['metal', 'heavy metal'],
+            'reggae': ['reggae', 'ska'],
             'country': ['country', 'folk'],
-            'latin': ['latin', 'reggaeton', 'bachata'],
-            'k-pop': ['k-pop', 'kpop', 'korean'],
+            'latin': ['latin', 'reggaeton'],
         }
         for genre_name, keywords in genre_map.items():
             for tag in all_tags:
@@ -391,36 +408,38 @@ def embed_metadata_ffmpeg(input_path, output_path, info, lyrics=None):
                     break
             if genre:
                 break
+    # Default genre based on artist/platform
+    if not genre:
+        genre = 'hip-hop'  # Default for this bot
     
-    # Clean title for album detection
-    # If title contains " - " it might be "Artist - Title" format
+    # Track number
+    track_number = info.get('track_number') or info.get('playlist_index') or 0
+    playlist_count = info.get('n_entries') or info.get('playlist_count') or 0
+    
+    # Year from upload_date
+    upload_date = info.get('upload_date', '')
+    year = upload_date[:4] if upload_date and len(upload_date) >= 4 else ''
+    
+    # Clean title
     clean_title = title
-    if ' - ' in title and not album:
+    if ' - ' in title:
         parts = title.split(' - ', 1)
         if len(parts) == 2:
-            # Check if first part looks like an artist
-            potential_artist = parts[0].strip()
-            potential_title = parts[1].strip()
-            # Only split if artist matches
-            if potential_artist.lower() in artist.lower() or artist.lower() in potential_artist.lower():
-                clean_title = potential_title
-
-    # ALWAYS output as MP3 for full metadata support
-    output_file = DOWNLOAD_DIR / (Path(output_path).stem + '.mp3')
-
-    # Download cover art with proper headers
+            if parts[0].strip().lower() in artist.lower() or artist.lower() in parts[0].strip().lower():
+                clean_title = parts[1].strip()
+    
+    # Download cover art
+    thumbnail = info.get('thumbnail')
     cover_path = None
     if thumbnail:
         cover_path = str(input_path) + '.cover.jpg'
         if not download_cover(thumbnail, cover_path):
-            # Try alternative thumbnail URLs
             alt_urls = []
             if 'i1.sndcdn.com' in thumbnail:
                 alt_urls = [
                     thumbnail.replace('-large', '-t300x300'),
                     thumbnail.replace('-large', '-t500x500'),
                     thumbnail.replace('-t100x100', '-t500x500'),
-                    thumbnail.replace('-t100x100', '-t300x300'),
                 ]
             elif 'yt3' in thumbnail or 'i.ytimg.com' in thumbnail:
                 vid_id = thumbnail.split('/')[-1].split('.')[0]
@@ -434,19 +453,27 @@ def embed_metadata_ffmpeg(input_path, output_path, info, lyrics=None):
             else:
                 cover_path = None
 
-    # Build base metadata args
-    base_meta = ['-metadata', f'title={clean_title}', '-metadata', f'artist={artist}', '-metadata', f'album={album}']
+    # Build metadata args
+    base_meta = ['-metadata', f'title={clean_title}', '-metadata', f'artist={artist}']
+    if album:
+        base_meta += ['-metadata', f'album={album}']
     if genre:
         base_meta += ['-metadata', f'genre={genre}']
-    
-    # Add lyrics metadata if available
+    if year:
+        base_meta += ['-metadata', f'date={year}']
+    if track_number:
+        track_str = str(track_number)
+        if playlist_count:
+            track_str = f'{track_number}/{playlist_count}'
+        base_meta += ['-metadata', f'track={track_str}']
     if lyrics:
         base_meta += ['-metadata', f'lyrics={lyrics[:4000]}']
 
     has_cover = cover_path and os.path.exists(cover_path)
+    input_ext = Path(input_path).suffix.lower()
+    output_file = DOWNLOAD_DIR / (Path(output_path).stem + '.mp3')
 
-    # === SMART CONVERSION LOGIC ===
-    # Source is already MP3 → just remux metadata (no quality loss)
+    # Build ffmpeg command
     if input_ext == '.mp3':
         cmd = ['ffmpeg', '-y', '-i', str(input_path)]
         if has_cover:
@@ -455,22 +482,15 @@ def embed_metadata_ffmpeg(input_path, output_path, info, lyrics=None):
             cmd += ['-map', '0:a']
         cmd += ['-c:a', 'copy', '-id3v2_version', '3'] + base_meta + [str(output_file)]
     else:
-        # Source is m4a/opus/flac/aac/webm → convert to MP3 320kbps
         cmd = ['ffmpeg', '-y', '-i', str(input_path)]
         if has_cover:
             cmd += ['-i', cover_path, '-map', '0:a', '-map', '1:0']
         else:
             cmd += ['-map', '0:a']
-        
-        # Best quality MP3 encoding settings
         cmd += [
-            '-c:a', 'libmp3lame',
-            '-b:a', '320k',           # 320kbps CBR - maximum MP3 quality
-            '-ar', '44100',           # Standard CD sample rate
-            '-reservoir', '1',        # Enable reservoir for better quality
-            '-q:a', '0',             # VBR quality 0 (highest) - redundant but ensures best
-            '-id3v2_version', '3',    # ID3v2.3 for best player compatibility
-            '-write_id3v1', '1',      # Also write ID3v1 tag for old players
+            '-c:a', 'libmp3lame', '-b:a', '320k', '-ar', '44100',
+            '-reservoir', '1', '-q:a', '0',
+            '-id3v2_version', '3', '-write_id3v1', '1',
         ] + base_meta + [str(output_file)]
 
     try:
@@ -478,58 +498,40 @@ def embed_metadata_ffmpeg(input_path, output_path, info, lyrics=None):
         if result.returncode != 0:
             logger.error(f"ffmpeg stderr: {result.stderr.decode()[:500]}")
         else:
-            logger.info(f"Metadata embedded: cover={has_cover}, lyrics={'yes' if lyrics else 'no'}, format=mp3-320k")
+            logger.info(f"Metadata: title={clean_title}, artist={artist}, album={album}, genre={genre}, track={track_number}, cover={has_cover}")
     except Exception as e:
         logger.error(f"ffmpeg exception: {e}")
         shutil.copy2(str(input_path), str(output_file))
     finally:
         if cover_path and os.path.exists(cover_path):
             os.remove(cover_path)
-        lyrics_file = str(input_path) + '.lyrics.txt'
-        if os.path.exists(lyrics_file):
-            os.remove(lyrics_file)
 
-    # Use mutagen to properly embed lyrics (USLT frame) + album/genre (TALB/TCON)
+    # Use mutagen for proper ID3 tags
     if output_file.exists():
         try:
             from mutagen.mp3 import MP3
-            from mutagen.id3 import ID3, USLT, TALB, TCON, TPE2, TDRC
-            import mutagen
-            
+            from mutagen.id3 import ID3, USLT, TALB, TCON, TPE2, TDRC, TRCK
             audio = MP3(str(output_file))
             if audio.tags is None:
                 audio.add_tags()
-            
-            # Add album (TALB frame)
             if album:
                 audio.tags.add(TALB(encoding=3, text=album))
-            
-            # Add genre (TCON frame)
             if genre:
                 audio.tags.add(TCON(encoding=3, text=genre))
-            
-            # Add year if available
-            upload_date = info.get('upload_date', '')
-            if upload_date and len(upload_date) == 8:
-                audio.tags.add(TDRC(encoding=3, text=upload_date[:4]))
-            
-            # Add lyrics (USLT frame) - this is what players actually read
+            if year:
+                audio.tags.add(TDRC(encoding=3, text=year))
+            if track_number:
+                audio.tags.add(TRCK(encoding=3, text=str(track_number) + ('/' + str(playlist_count) if playlist_count else '')))
+            audio.tags.add(TPE2(encoding=3, text=artist))  # Album artist
             if lyrics:
-                audio.tags.add(USLT(
-                    encoding=3,  # UTF-8
-                    lang='eng',
-                    desc='',
-                    text=lyrics[:4000]
-                ))
-            
+                audio.tags.add(USLT(encoding=3, lang='eng', desc='', text=lyrics[:4000]))
             audio.save()
-            logger.info(f"Mutagen tags: album={album}, genre={genre}, lyrics={'yes' if lyrics else 'no'}")
+            logger.info(f"Mutagen: album={album}, genre={genre}, track={track_number}/{playlist_count}, lyrics={'yes' if lyrics else 'no'}")
         except Exception as e:
-            logger.error(f"Mutagen embed error: {e}")
+            logger.error(f"Mutagen error: {e}")
 
     return output_file
 
-# ==================== LYRICS ====================
 def fetch_lyrics_sync(artist, title):
     """Fetch lyrics from multiple sources with fallback"""
     # Clean artist/title for better search results
