@@ -944,7 +944,7 @@ async def download_video(url, chat_id, context, quality='best'):
             
             if result:
                 platform = get_platform_name(url)
-                await db_log(url, title, info.get('uploader', ''), '', platform, 'video', 'success', str(temp_file))
+                db_log(url, title, info.get('uploader', ''), '', platform, 'video', 'success', str(temp_file))
                 await status_msg.edit_text("✅ ویدئو ارسال شد!")
                 temp_file.unlink()
                 record_download('YouTube', 'video', 'success', time.time() - start_time)
@@ -966,7 +966,7 @@ async def download_video(url, chat_id, context, quality='best'):
             )
 
         platform = get_platform_name(url)
-        await db_log(url, title, info.get('uploader', ''), '', platform, 'video', 'success', str(temp_file))
+        db_log(url, title, info.get('uploader', ''), '', platform, 'video', 'success', str(temp_file))
         await status_msg.edit_text("✅ ویدئو ارسال شد!")
         temp_file.unlink()
         record_download('YouTube', 'video', 'success', time.time() - start_time)
@@ -1718,7 +1718,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if not info:
                             info = {'title': 'Unknown', 'uploader': '', 'album': '',
                                     'duration': 0, 'thumbnail': None}
-                        hist_id = await db_log(text, info.get('title', ''), info.get('uploader', ''),
+                        hist_id = db_log(text, info.get('title', ''), info.get('uploader', ''),
                                              info.get('album', ''), platform, 'audio', 'success')
                         await send_audio_file(chat_id, context, output_file, info, hist_id)
                         if output_file.exists():
@@ -1738,7 +1738,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await asyncio.sleep(2 ** attempt)
                         else:
                             await status_msg.edit_text(f"❌ خطا: {err[:200]}")
-                            await db_log(text, '', '', '', platform, 'audio', 'failed')
+                            db_log(text, '', '', '', platform, 'audio', 'failed')
                             record_download(platform, 'audio', 'failed', time.time() - start_time)
                             record_error(platform, "download_failed")
             except Exception as e:
