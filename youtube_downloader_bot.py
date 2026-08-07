@@ -53,7 +53,8 @@ BASE_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = BASE_DIR / "media_downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 COOKIE_FILE = BASE_DIR / "youtube_downloads" / "cookies.txt"
-DB_PATH = BASE_DIR / "bot.db"
+# Use /tmp for SQLite (writable by non-root user in Docker)
+DB_PATH = Path("/tmp/bot.db")
 
 # Async yt-dlp executor (controlled thread pool)
 YTDLP_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="yt-dlp")
@@ -76,6 +77,27 @@ _shutdown_requested = False
 # Database is now async PostgreSQL via database.py module
 # Old SQLite functions replaced with async database calls
 
+def _init_sqlite():
+    """Create SQLite tables if they don't exist."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""CREATE TABLE IF NOT EXISTS download_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            url TEXT, title TEXT, artist TEXT, album TEXT,
+            platform TEXT, content_type TEXT, status TEXT,
+            file_path TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS user_reactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            history_id INTEGER, user_id INTEGER, action TEXT
+        )""")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning("sqlite_init_failed", error=str(e))
+
+_init_sqlite()
+
 async def init_db():
     """Initialize database connection and schema."""
     db = await get_database()
@@ -85,66 +107,89 @@ async def init_db():
         logger.info("running_without_database")
 
 def db_log(url, title, artist, album, platform, content_type, status, file_path=""):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO download_history (url,title,artist,album,platform,content_type,status,file_path) VALUES (?,?,?,?,?,?,?,?)",
-        (url, title, artist, album, platform, content_type, status, file_path)
-    )
-    conn.commit()
-    hist_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    conn.close()
-    return hist_id
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO download_history (url,title,artist,album,platform,content_type,status,file_path) VALUES (?,?,?,?,?,?,?,?)",
+            (url, title, artist, album, platform, content_type, status, file_path)
+        )
+        conn.commit()
+        hist_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.close()
+        return hist_id
+    except Exception as e:
+        logger.warning("db_log_failed", error=str(e))
+        return 0
 
 def db_get_history(limit=10):
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT id,title,artist,platform,content_type,status,timestamp FROM download_history ORDER BY id DESC LIMIT ?",
-        (limit,)
-    ).fetchall()
-    conn.close()
-    return rows
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT id,title,artist,platform,content_type,status,timestamp FROM download_history ORDER BY id DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.warning("db_get_history_failed", error=str(e))
+        return []
 
 def db_get_favorites():
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute("""
-        SELECT dh.id, dh.title, dh.artist, dh.url, dh.timestamp
-        FROM download_history dh
-        JOIN user_reactions ur ON dh.id = ur.history_id
-        WHERE ur.action = 'like'
-        ORDER BY ur.id DESC LIMIT 20
-    """).fetchall()
-    conn.close()
-    return rows
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute("""
+            SELECT dh.id, dh.title, dh.artist, dh.url, dh.timestamp
+            FROM download_history dh
+            JOIN user_reactions ur ON dh.id = ur.history_id
+            WHERE ur.action = 'like'
+            ORDER BY ur.id DESC LIMIT 20
+        """).fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.warning("db_get_favorites_failed", error=str(e))
+        return []
 
 def db_get_albums():
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute("""
-        SELECT artist, album, COUNT(*) as cnt
-        FROM download_history
-        WHERE artist != '' AND album != ''
-        GROUP BY artist, album
-        ORDER BY cnt DESC LIMIT 20
-    """).fetchall()
-    conn.close()
-    return rows
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute("""
+            SELECT artist, album, COUNT(*) as cnt
+            FROM download_history
+            WHERE artist != '' AND album != ''
+            GROUP BY artist, album
+            ORDER BY cnt DESC LIMIT 20
+        """).fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.warning("db_get_albums_failed", error=str(e))
+        return []
 
 def db_log_reaction(history_id, user_id, action):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO user_reactions (history_id, user_id, action) VALUES (?,?,?)",
-        (history_id, user_id, action)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO user_reactions (history_id, user_id, action) VALUES (?,?,?)",
+            (history_id, user_id, action)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning("db_log_reaction_failed", error=str(e))
 
 def db_get_logs(limit=15):
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT title,platform,status,timestamp FROM download_history ORDER BY id DESC LIMIT ?",
-        (limit,)
-    ).fetchall()
-    conn.close()
-    return rows
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT title,platform,status,timestamp FROM download_history ORDER BY id DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.warning("db_get_logs_failed", error=str(e))
+        return []
 
 # ==================== RATE LIMITING ====================
 # Now using rate_limiter module with Redis backend and in-memory fallback
