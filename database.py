@@ -137,6 +137,23 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_playlists_share_token
                 ON playlists(share_token)
             """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS allowed_users (
+                    user_id BIGINT PRIMARY KEY,
+                    username TEXT DEFAULT '',
+                    display_name TEXT DEFAULT '',
+                    added_by BIGINT DEFAULT 0,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    daily_limit INTEGER DEFAULT 50,
+                    total_downloads INTEGER DEFAULT 0,
+                    last_download_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_allowed_users_active
+                ON allowed_users(is_active)
+            """)
 
     async def add_download_history(
         self,
@@ -350,8 +367,137 @@ class Database:
             ) for r in rows]
 
 
+
+    # ==================== USER MANAGEMENT ====================
+    async def add_allowed_user(
+        self,
+        user_id: int,
+        username: str = '',
+        display_name: str = '',
+        added_by: int = 0,
+        daily_limit: int = 50
+    ) -> bool:
+        """Add or update an allowed user. Returns True if new, False if updated."""
+        async with self.acquire() as conn:
+            result = await conn.execute("""
+                INSERT INTO allowed_users (user_id, username, display_name, added_by, daily_limit, is_active, total_downloads, created_at)
+                VALUES ($1, $2, $3, $4, $5, TRUE, 0, NOW())
+                ON CONFLICT (user_id) DO UPDATE SET
+                    username = EXCLUDED.username,
+                    display_name = EXCLUDED.display_name,
+                    added_by = EXCLUDED.added_by,
+                    daily_limit = EXCLUDED.daily_limit,
+                    is_active = TRUE,
+                    updated_at = NOW()
+            """, user_id, username, display_name, added_by, daily_limit)
+            return "INSERT" in result
+
+    async def remove_allowed_user(self, user_id: int) -> bool:
+        """Remove an allowed user. Returns True if deleted."""
+        async with self.acquire() as conn:
+            result = await conn.execute("DELETE FROM allowed_users WHERE user_id = $1", user_id)
+            return result == "DELETE 1"
+
+    async def is_user_allowed(self, user_id: int) -> bool:
+        """Check if user is allowed and active."""
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT is_active FROM allowed_users WHERE user_id = $1", user_id
+            )
+            return row and row["is_active"]
+
+    async def get_allowed_users(self) -> list:
+        """Get all active allowed users."""
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM allowed_users WHERE is_active = TRUE ORDER BY created_at DESC"
+            )
+            return [dict(r) for r in rows]
+
+    async def get_user_stats(self, user_id: int) -> dict | None:
+        """Get user stats including downloads today."""
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM allowed_users WHERE user_id = $1", user_id
+            )
+            if not row:
+                return None
+            user = dict(row)
+            # Get downloads today
+            today = await conn.fetchval("""
+                SELECT COUNT(*) FROM download_history
+                WHERE metadata->>'user_id' = $1
+                AND created_at >= CURRENT_DATE
+            """, str(user_id))
+            user["downloads_today"] = today
+            return user
+
+    async def increment_user_downloads(self, user_id: int) -> None:
+        """Increment user's total downloads and update last_download_at."""
+        async with self.acquire() as conn:
+            await conn.execute("""
+                UPDATE allowed_users
+                SET total_downloads = total_downloads + 1,
+                    last_download_at = NOW()
+                WHERE user_id = $1
+            """, user_id)
+
+    async def get_all_user_ids(self) -> list[int]:
+        """Get all active user IDs for broadcasting."""
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT user_id FROM allowed_users WHERE is_active = TRUE"
+            )
+            return [r["user_id"] for r in rows]
+
+    async def get_bot_stats(self) -> dict:
+        """Get overall bot statistics."""
+        async with self.acquire() as conn:
+            total_users = await conn.fetchval(
+                "SELECT COUNT(*) FROM allowed_users WHERE is_active = TRUE"
+            )
+            total_downloads = await conn.fetchval(
+                "SELECT COUNT(*) FROM download_history"
+            )
+            downloads_today = await conn.fetchval(
+                "SELECT COUNT(*) FROM download_history WHERE created_at >= CURRENT_DATE"
+            )
+            downloads_this_hour = await conn.fetchval(
+                "SELECT COUNT(*) FROM download_history WHERE created_at >= NOW() - INTERVAL '1 hour'"
+            )
+            return {
+                "total_users": total_users,
+                "total_downloads": total_downloads,
+                "downloads_today": downloads_today,
+                "downloads_this_hour": downloads_this_hour,
+            }
+
+    async def set_user_active(self, user_id: int, active: bool) -> None:
+        """Ban or unban a user."""
+        async with self.acquire() as conn:
+            await conn.execute(
+                "UPDATE allowed_users SET is_active = $1 WHERE user_id = $2",
+                active, user_id
+            )
+
+    async def update_user_daily_limit(self, user_id: int, limit: int) -> None:
+        """Update user's daily download limit."""
+        async with self.acquire() as conn:
+            await conn.execute(
+                "UPDATE allowed_users SET daily_limit = $1 WHERE user_id = $2",
+                limit, user_id
+            )
+
+    async def get_user_downloads_today(self, user_id: int) -> int:
+        """Count user's downloads today."""
+        async with self.acquire() as conn:
+            return await conn.fetchval("""
+                SELECT COUNT(*) FROM download_history
+                WHERE metadata->>'user_id' = $1
+                AND created_at >= CURRENT_DATE
+            """, str(user_id))
+
 # Global database instance
-_database: Optional[Database] = None
 
 
 async def get_database() -> Optional[Database]:

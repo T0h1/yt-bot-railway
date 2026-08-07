@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     allowed_users: str = Field(default="", description="Comma-separated list of allowed user IDs (empty = all)")
     max_downloads_per_user_per_day: int = Field(default=50, description="Default daily download limit per user")
 
+    # Rate limiting
+    rate_limit_per_minute: int = Field(default=5, description="Max requests per minute per user", validation_alias="RATE_LIMIT_PER_MINUTE")
+    rate_limit_per_hour: int = Field(default=20, description="Max requests per hour per user", validation_alias="RATE_LIMIT_PER_HOUR")
+
     model_config = SettingsConfigDict(
         env_file=".env_ytdl",
         env_file_encoding="utf-8",
@@ -94,3 +98,5 @@ PORT = settings.port
 # Multi-user
 ALLOWED_USERS = [int(x.strip()) for x in settings.allowed_users.split(",") if x.strip()] if settings.allowed_users else []
 MAX_DOWNLOADS_PER_USER_PER_DAY = settings.max_downloads_per_user_per_day
+RATE_LIMIT_PER_MINUTE = settings.rate_limit_per_minute
+RATE_LIMIT_PER_HOUR = settings.rate_limit_per_hour

@@ -43,6 +43,11 @@ from download_queue import get_download_queue, close_download_queue, DownloadTas
 from cookie_manager import get_cookie_manager, convert_cookies, detect_cookie_format
 from metrics import init_metrics, record_download, record_error, set_active_downloads, set_queue_stats, record_rate_limit, setup_metrics_app
 from chunked_upload import upload_with_progress
+from admin_dashboard import (
+    cmd_admin, cmd_adduser, cmd_removeuser, cmd_listusers,
+    cmd_toggleuser, cmd_userinfo, handle_admin_callback,
+    handle_admin_broadcast, is_admin as is_bot_admin
+)
 
 # ==================== SETUP ====================
 # Initialize structured logging
@@ -1129,6 +1134,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     data = query.data
 
+    # Admin dashboard callbacks (handle first, before other handlers)
+    if data.startswith("admin_"):
+        if await handle_admin_callback(update, context):
+            return
+
+    # Broadcast state: admin typing broadcast message
+    if await handle_admin_broadcast(update, context):
+        return
+
     # Cookie-related callbacks
     if data.startswith("cookie_set|") or data.startswith("cookie_del|"):
         if await handle_cookie_callback(query, chat_id, data, context):
@@ -1201,10 +1215,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not tracks:
             await query.edit_message_text("❌ لیست آهنگ‌ها خالیه.")
             return
-        import zipfile, tempfile, shutil
         artist_name = session.get('artist_name', 'Unknown')
-        await query.edit_message_text(f"⏳ دانلود {len(tracks)} آهنگ از {artist_name}...")
-        temp_dir = Path(tempfile.mkdtemp(prefix="dl_all_"))
+        total = len(tracks)
+        await query.edit_message_text(f"⏳ دانلود {total} آهنگ از {artist_name}...")
+        
+        # Strategy: download tracks one by one, send each immediately
+        # This avoids zip size issues and saves temp disk space
         success = 0
         failed = []
         for i, track in enumerate(tracks):
@@ -1212,44 +1228,34 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not url:
                 failed.append(track['title'])
                 continue
-            await context.bot.send_message(chat_id, f"🎵 [{i+1}/{len(tracks)}] {track['title']}...")
+            # Update progress every 5 tracks to avoid Telegram rate limit
+            if i % 5 == 0 or i == total - 1:
+                try:
+                    await context.bot.send_message(chat_id, f"🎵 [{i+1}/{total}] {track['title']}...")
+                except Exception:
+                    pass
             try:
                 output_file, err = await download_audio(url, chat_id, context, track['title'])
                 if output_file:
-                    safe_name = re.sub(r'[<>:"/\\|?*]', '_', track['title'][:80])
-                    dest = temp_dir / f"{safe_name}.mp3"
-                    output_file.rename(dest)
+                    # Send individual file directly (skip zip entirely)
+                    info = {'title': track['title'], 'artist': track.get('uploader', ''),
+                            'album': '', 'duration': track.get('duration', 0), 'thumbnail': track.get('thumbnail')}
+                    platform = get_platform_name(url) if url else 'Unknown'
+                    hist_id = db_log(url, track['title'], track.get('uploader', ''), '', platform, 'audio', 'success')
+                    await send_audio_file(chat_id, context, output_file, info, hist_id)
+                    if output_file.exists():
+                        output_file.unlink()
                     success += 1
                 else:
                     failed.append(f"{track['title']}: {err[:50]}")
             except Exception as e:
                 failed.append(f"{track['title']}: {str(e)[:50]}")
-        # Create and send zip file
-        if success > 0:
-            safe_artist = re.sub(r'[<>:"/\\|?*]', '_', artist_name[:50])
-            zip_path = DOWNLOAD_DIR / f"{safe_artist} - {success} tracks.zip"
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for mp3_file in temp_dir.glob("*.mp3"):
-                    zf.write(mp3_file, mp3_file.name)
-            file_size = zip_path.stat().st_size
-            if file_size <= TELEGRAM_MAX_FILE:
-                with open(zip_path, 'rb') as f:
-                    await context.bot.send_document(
-                        chat_id=chat_id, document=f,
-                        caption=f"📦 {artist_name} - {success} آهنگ",
-                        filename=f"{safe_artist}.zip"
-                    )
-            else:
-                await context.bot.send_message(chat_id, f"⚠️ فایل زیپ خیلی بزرگه ({file_size // (1024*1024)}MB). آهنگ‌ها جداگانه ارسال شدند.")
-                for mp3_file in temp_dir.glob("*.mp3"):
-                    with open(mp3_file, 'rb') as f:
-                        await context.bot.send_audio(chat_id=chat_id, audio=f, title=mp3_file.stem)
-            zip_path.unlink(missing_ok=True)
-        msg = f"✅ {success}/{len(tracks)} آهنگ دانلود شد!"
+        
+        # Send summary
+        msg = f"✅ {success}/{total} آهنگ دانلود شد!"
         if failed:
             msg += f"\n\n❌ ناموفق ({len(failed)}):\n" + "\n".join(failed[:10])
         await context.bot.send_message(chat_id, msg)
-        shutil.rmtree(temp_dir, ignore_errors=True)
         return
 
     # Download single track from artist
@@ -1349,6 +1355,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/albums` — آلبوم‌ها\n"
         "`/stats` — آمار سیستم\n"
         "`/logs` — لاگ‌ها (ادمین)\n"
+        "`/admin` — داشبورد مدیریت (ادمین)\n"
         "`/help` — راهنما",
         parse_mode='Markdown'
     )
@@ -1714,28 +1721,52 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if handled:
             return
     
-    # Check if user is allowed (if ALLOWED_USERS is configured)
-    if ALLOWED_USERS and user_id not in ALLOWED_USERS:
+    # Check if user is allowed
+    # First check DB-based allowlist (if PostgreSQL configured)
+    db = await get_database()
+    if db:
+        if not await db.is_user_allowed(user_id):
+            await update.message.reply_text("❌ شما اجازه استفاده از ربات را ندارید.")
+            return
+    elif ALLOWED_USERS and user_id not in ALLOWED_USERS:
         await update.message.reply_text("❌ شما اجازه استفاده از ربات را ندارید.")
         return
-    
-    # Check user quota
-    # NOTE: User quota check disabled - get_or_create_user/check_user_quota not implemented in Database class
-    # if settings.postgres_dsn:
-    #     from database import get_database
-    #     db = await get_database()
-    #     if db:
-    #         ... (quota check)
 
     text = update.message.text
     if not text or not text.startswith('http'):
         return
 
-    # Rate limit using new rate limiter
+    # Rate limit: per-minute
     if not await check_rate_limit(user_id):
-        await update.message.reply_text("⏳ صبر کن! زیاد دانلود کردی (5 دانلود در دقیقه).")
+        remaining = await get_remaining_requests(user_id)
+        await update.message.reply_text(
+            f"⏳ صبر کن! درخواست‌های زیادی فرستادی.\n"
+            f"📊 مجاز: {RATE_LIMIT_PER_MINUTE}/دقیقه | باقی‌مانده: {remaining}"
+        )
         record_rate_limit(user_id)
         return
+
+    # Rate limit: per-hour
+    from rate_limiter import check_rate_limit_hourly
+    if not await check_rate_limit_hourly(user_id):
+        await update.message.reply_text(
+            f"⏳ محدودیت ساعتی! حداکثر {RATE_LIMIT_PER_HOUR} درخواست در ساعت."
+        )
+        record_rate_limit(user_id)
+        return
+
+    # Daily quota check (DB only)
+    if db:
+        user_info = await db.get_user_stats(user_id)
+        daily_limit = user_info["daily_limit"] if user_info else MAX_DOWNLOADS_PER_USER_PER_DAY
+        from rate_limiter import check_daily_quota
+        allowed, remaining = await check_daily_quota(user_id, daily_limit)
+        if not allowed:
+            await update.message.reply_text(
+                f"📅 سقف دانلود روزانه تمام شد! ({daily_limit}/روز)"
+            )
+            record_rate_limit(user_id)
+            return
 
     url_type, resolved = detect_url_type(text)
     chat_id = update.effective_chat.id
@@ -1773,7 +1804,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             output_file.unlink()
                         await status_msg.edit_text("✅ ارسال شد!")
                         record_download(platform, 'audio', 'success', time.time() - start_time)
-                        # NOTE: User download count increment disabled - increment_user_downloads not implemented
+                        # Increment user download count
+                        if db:
+                            await db.increment_user_downloads(user_id)
                         break
                     else:
                         if attempt < 2:
@@ -1915,6 +1948,16 @@ def signal_handler(signum, frame):
     _shutdown_requested = True
     logger.info("signal_received", signal=signum)
 
+
+# ==================== ERROR HANDLER ====================
+async def error_handler(update, context):
+    """Centralized error handler for unhandled exceptions."""
+    logger.error("unhandled_error", error=str(context.error), update=str(update)[:200] if update else "None")
+    if update and update.effective_message:
+        try:
+            await update.effective_message.reply_text("❌ خطای پیش‌بینی نشده‌ای رخ داد. لطفاً دوباره تلاش کنید.")
+        except Exception:
+            pass
 # ==================== MAIN ====================
 async def main():
     # Initialize database
@@ -1931,6 +1974,7 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     
     app = Application.builder().token(TOKEN).build()
+    app.add_error_handler(error_handler)
     
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
@@ -1942,6 +1986,13 @@ async def main():
     app.add_handler(CommandHandler("logs", cmd_logs))
     app.add_handler(CommandHandler("cookie", cmd_cookie))
     app.add_handler(CommandHandler("removecookie", cmd_removecookie))
+    # Admin commands
+    app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("adduser", cmd_adduser))
+    app.add_handler(CommandHandler("removeuser", cmd_removeuser))
+    app.add_handler(CommandHandler("listusers", cmd_listusers))
+    app.add_handler(CommandHandler("toggleuser", cmd_toggleuser))
+    app.add_handler(CommandHandler("userinfo", cmd_userinfo))
     app.add_handler(CallbackQueryHandler(button_callback))
     # Document handler for cookie upload (must be before text handler)
     app.add_handler(MessageHandler(filters.Document.ALL, handle_cookie_document))
