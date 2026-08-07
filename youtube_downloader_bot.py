@@ -635,7 +635,14 @@ async def download_audio(url, chat_id, context, title_override=None, progress_ms
             return None, "اطلاعات آهنگ یافت نشد"
 
         title = title_override or info.get('title', 'Unknown')
-        artist = info.get('artist') or info.get('uploader', 'Unknown')
+        # Prefer uploader (main artist) over artist (may contain "feat." or multiple artists)
+        uploader = info.get('uploader', '')
+        artist_field = info.get('artist', '')
+        # If artist has comma/separators, it's multiple artists - use uploader instead
+        if artist_field and (',' in artist_field or '，' in artist_field or ';' in artist_field):
+            artist = uploader or artist_field.split(',')[0].strip()
+        else:
+            artist = artist_field or uploader or 'Unknown'
         album = info.get('album') or info.get('playlist_title', '')
         duration = info.get('duration', 0)
         thumbnail = info.get('thumbnail')
@@ -701,7 +708,12 @@ async def download_audio(url, chat_id, context, title_override=None, progress_ms
 
 async def send_audio_file(chat_id, context, output_file, info, history_id=None):
     title = info.get('title', 'Unknown')
-    artist = info.get('artist') or info.get('uploader', 'Unknown')
+    uploader = info.get('uploader', '')
+    artist_field = info.get('artist', '')
+    if artist_field and (',' in artist_field or '，' in artist_field or ';' in artist_field):
+        artist = uploader or artist_field.split(',')[0].strip()
+    else:
+        artist = artist_field or uploader or 'Unknown'
     album = info.get('album') or info.get('playlist_title', '')
     duration = info.get('duration', 0)
     thumbnail = info.get('thumbnail')
@@ -1189,7 +1201,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not tracks:
             await query.edit_message_text("❌ لیست آهنگ‌ها خالیه.")
             return
-        await query.edit_message_text(f"⏳ دانلود {len(tracks)} آهنگ...")
+        import zipfile, tempfile, shutil
+        artist_name = session.get('artist_name', 'Unknown')
+        await query.edit_message_text(f"⏳ دانلود {len(tracks)} آهنگ از {artist_name}...")
+        temp_dir = Path(tempfile.mkdtemp(prefix="dl_all_"))
         success = 0
         failed = []
         for i, track in enumerate(tracks):
@@ -1197,24 +1212,44 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not url:
                 failed.append(track['title'])
                 continue
-            await context.bot.send_message(chat_id, f"🎵 [{i+1}/{len(tracks)}] {track['title']}")
+            await context.bot.send_message(chat_id, f"🎵 [{i+1}/{len(tracks)}] {track['title']}...")
             try:
                 output_file, err = await download_audio(url, chat_id, context, track['title'])
                 if output_file:
-                    info = {'title': track['title'], 'artist': track.get('uploader', ''),
-                            'album': '', 'duration': track.get('duration', 0), 'thumbnail': track.get('thumbnail')}
-                    await send_audio_file(chat_id, context, output_file, info)
-                    if output_file.exists():
-                        output_file.unlink()
+                    safe_name = re.sub(r'[<>:"/\\|?*]', '_', track['title'][:80])
+                    dest = temp_dir / f"{safe_name}.mp3"
+                    output_file.rename(dest)
                     success += 1
                 else:
                     failed.append(f"{track['title']}: {err[:50]}")
             except Exception as e:
                 failed.append(f"{track['title']}: {str(e)[:50]}")
+        # Create and send zip file
+        if success > 0:
+            safe_artist = re.sub(r'[<>:"/\\|?*]', '_', artist_name[:50])
+            zip_path = DOWNLOAD_DIR / f"{safe_artist} - {success} tracks.zip"
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for mp3_file in temp_dir.glob("*.mp3"):
+                    zf.write(mp3_file, mp3_file.name)
+            file_size = zip_path.stat().st_size
+            if file_size <= TELEGRAM_MAX_FILE:
+                with open(zip_path, 'rb') as f:
+                    await context.bot.send_document(
+                        chat_id=chat_id, document=f,
+                        caption=f"📦 {artist_name} - {success} آهنگ",
+                        filename=f"{safe_artist}.zip"
+                    )
+            else:
+                await context.bot.send_message(chat_id, f"⚠️ فایل زیپ خیلی بزرگه ({file_size // (1024*1024)}MB). آهنگ‌ها جداگانه ارسال شدند.")
+                for mp3_file in temp_dir.glob("*.mp3"):
+                    with open(mp3_file, 'rb') as f:
+                        await context.bot.send_audio(chat_id=chat_id, audio=f, title=mp3_file.stem)
+            zip_path.unlink(missing_ok=True)
         msg = f"✅ {success}/{len(tracks)} آهنگ دانلود شد!"
         if failed:
             msg += f"\n\n❌ ناموفق ({len(failed)}):\n" + "\n".join(failed[:10])
         await context.bot.send_message(chat_id, msg)
+        shutil.rmtree(temp_dir, ignore_errors=True)
         return
 
     # Download single track from artist
