@@ -531,6 +531,15 @@ def fetch_lyrics_sync(artist, title):
                    '[Official Video]', '[Official Audio]', '[Lyrics]']:
         title_clean = title_clean.replace(suffix, '').strip()
     
+    # Remove producer tags: [Prod. ...], (Prod. ...), [Produced by ...]
+    title_clean = re.sub(r'\[prod\.?.*?\]', '', title_clean, flags=re.IGNORECASE).strip()
+    title_clean = re.sub(r'\(prod\.?.*?\)', '', title_clean, flags=re.IGNORECASE).strip()
+    # Remove any remaining brackets content like [Remix], [Clean], etc.
+    title_clean = re.sub(r'\[.*?\]', '', title_clean).strip()
+    title_clean = re.sub(r'\(.*?\)', '', title_clean).strip()
+    # Remove "Feat." / "ft." variations
+    title_clean = re.sub(r'\s*(feat\.|ft\.|featuring)\s*.*', '', title_clean, flags=re.IGNORECASE).strip()
+    
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json',
@@ -651,9 +660,11 @@ async def download_audio(url, chat_id, context, title_override=None, progress_ms
         # Prefer uploader (main artist) over artist (may contain "feat." or multiple artists)
         uploader = info.get('uploader', '')
         artist_field = info.get('artist', '')
-        # If artist has comma/separators, it's multiple artists - use uploader instead
-        if artist_field and (',' in artist_field or '，' in artist_field or ';' in artist_field):
-            artist = uploader or artist_field.split(',')[0].strip()
+        # Split on any comma type (English , Persian ، Chinese ， semicolon ;)
+        artist_seps = re.split(r'[,，،;；]', artist_field)
+        if len(artist_seps) > 1:
+            # Multiple artists - use uploader (main artist) or first one
+            artist = uploader or artist_seps[0].strip()
         else:
             artist = artist_field or uploader or 'Unknown'
         album = info.get('album') or info.get('playlist_title', '')
@@ -723,8 +734,10 @@ async def send_audio_file(chat_id, context, output_file, info, history_id=None):
     title = info.get('title', 'Unknown')
     uploader = info.get('uploader', '')
     artist_field = info.get('artist', '')
-    if artist_field and (',' in artist_field or '，' in artist_field or ';' in artist_field):
-        artist = uploader or artist_field.split(',')[0].strip()
+    # Split on any comma type (English , Persian ، Chinese ， semicolon ;)
+    artist_seps = re.split(r'[,，،;；]', artist_field) if artist_field else []
+    if len(artist_seps) > 1:
+        artist = uploader or artist_seps[0].strip()
     else:
         artist = artist_field or uploader or 'Unknown'
     album = info.get('album') or info.get('playlist_title', '')
