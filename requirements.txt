@@ -37,3 +37,6 @@ pydub>=0.25
 
 # Type hints (for development)
 typing-extensions>=4.8
+
+# Genius lyrics API
+lyricsgenius>=1.1

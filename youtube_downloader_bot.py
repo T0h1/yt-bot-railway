@@ -16,6 +16,14 @@ from urllib.parse import urlparse, urlunparse
 from concurrent.futures import ThreadPoolExecutor
 
 import requests as req_lib
+try:
+    import lyricsgenius
+    GENIUS_TOKEN = os.environ.get('GENIUS_API_TOKEN', '')
+    genius_client = lyricsgenius.Genius(GENIUS_TOKEN, verbose=False) if GENIUS_TOKEN else None
+    logger.info(f"Genius API: {'enabled' if genius_client else 'no token'}")
+except ImportError:
+    genius_client = None
+    logger.info("Genius API: lyricsgenius not installed")
 import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -591,47 +599,19 @@ def fetch_lyrics_sync(artist, title):
         logger.info(f"lyrics.fandom failed: {e}")
 
     # Source 3: Genius API (scrape search page)
-    try:
-        # Genius prefers "title artist" over "artist title"
-        search_url = f"https://genius.com/api/search?q={title_clean}%20{artist_clean}"
-        resp = req_lib.get(search_url, timeout=10, headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            hits = data.get('response', {}).get('hits', [])
-            if hits:
-                song_url = hits[0].get('result', {}).get('url', '')
-                if song_url:
-                    resp2 = req_lib.get(song_url, timeout=10, headers=headers)
-                    if resp2.status_code == 200:
-                        # Get text between each data-lyrics-container and the next one
-                        # This handles nested divs that old regex missed
-                        container_pattern = r'data-lyrics-container="true"[^>]*>(.*?)(?=data-lyrics-container|<footer|SongFooter)'
-                        matches = re.findall(container_pattern, resp2.text, re.DOTALL)
-                        all_parts = []
-                        for m in matches:
-                            cleaned = re.sub(r'<br\s*/?>', '\n', m)
-                            cleaned = re.sub(r'<[^>]+>', '', cleaned)
-                            cleaned = html.unescape(cleaned).strip()
-                            # Remove header junk
-                            cleaned = re.sub(r'\d+\s*Contributors?\s*\w*\s*Lyrics?', '', cleaned).strip()
-                            cleaned = re.sub(r'\[متن آهنگ.*?\]', '', cleaned).strip()
-                            cleaned = re.sub(r'^Lyrics\s*', '', cleaned).strip()
-                            # Remove "You might also like" ad sections
-                            cleaned = re.sub(r'You might also like.*$', '', cleaned, flags=re.DOTALL).strip()
-                            # Remove Genius footer junk
-                            cleaned = re.sub(r'Embed.*$', '', cleaned, flags=re.DOTALL).strip()
-                            cleaned = re.sub(r'Cancel.*$', '', cleaned, flags=re.DOTALL).strip()
-                            cleaned = re.sub(r'How to Format.*$', '', cleaned, flags=re.DOTALL).strip()
-                            # Skip if only whitespace/short garbage
-                            if cleaned and len(cleaned) > 3 and not cleaned.startswith('<'):
-                                all_parts.append(cleaned)
-                        if all_parts:
-                            best_lyrics = '\n\n'.join(all_parts)
-                            if len(best_lyrics) > 20:
-                                logger.info(f"Lyrics found from Genius: {len(best_lyrics)} chars ({len(all_parts)} parts)")
-                                return best_lyrics[:4000]
-    except Exception as e:
-        logger.info(f"Genius failed: {e}")
+        # Source 3: Try Genius API (via lyricsgenius)
+    if genius_client:
+        try:
+            song = genius_client.search_song(title_clean, artist_clean)
+            if song and song.lyrics:
+                lyrics = song.lyrics
+                # Clean header: [متن آهنگ «...» از ...]
+                lyrics = re.sub(r'^\[متن آهنگ.*?\]\s*', '', lyrics).strip()
+                if len(lyrics) > 20:
+                    logger.info(f"Lyrics found from Genius API: {len(lyrics)} chars")
+                    return lyrics[:4000]
+        except Exception as e:
+            logger.info(f"Genius API failed: {e}")
 
     # Source 4: Try simple lyrics API
     try:
