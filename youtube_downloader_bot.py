@@ -849,14 +849,19 @@ async def download_video(url, chat_id, context, quality='best'):
     if quality == 'best' and RAILWAY_MODE:
         quality = DEFAULT_VIDEO_QUALITY
 
-    format_map = {
-        'best': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
-        '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]',
-        '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]',
-        '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]',
-        '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]',
-    }
-    fmt = format_map.get(quality, format_map['best'])
+    platform = get_platform_name(resolved)
+    if platform in ('Instagram', 'TikTok', 'Twitter'):
+        # Instagram/TikTok/Twitter have limited formats - use best available
+        fmt = 'best'
+    else:
+        format_map = {
+            'best': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+            '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]',
+            '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]',
+            '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]',
+            '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]',
+        }
+        fmt = format_map.get(quality, format_map['best'])
 
     try:
         status_msg = await context.bot.send_message(chat_id=chat_id, text=f"🎬 در حال دانلود ویدئو ({quality})...")
