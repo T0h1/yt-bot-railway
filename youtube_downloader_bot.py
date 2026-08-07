@@ -16,14 +16,7 @@ from urllib.parse import urlparse, urlunparse
 from concurrent.futures import ThreadPoolExecutor
 
 import requests as req_lib
-try:
-    import lyricsgenius
-    GENIUS_TOKEN = os.environ.get('GENIUS_API_TOKEN', '')
-    genius_client = lyricsgenius.Genius(GENIUS_TOKEN) if GENIUS_TOKEN else None
-    logger.info(f"Genius API: {'enabled' if genius_client else 'no token'}")
-except ImportError:
-    genius_client = None
-    logger.info("Genius API: lyricsgenius not installed")
+genius_client = None
 import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -62,6 +55,19 @@ from admin_dashboard import (
 # Initialize structured logging
 setup_logging(log_level=settings.log_level, json_output=settings.log_json)
 logger = get_logger("mediabot")
+
+# Initialize Genius lyrics API
+try:
+    import lyricsgenius
+    GENIUS_TOKEN = os.environ.get('GENIUS_API_TOKEN', '')
+    genius_client = lyricsgenius.Genius(GENIUS_TOKEN) if GENIUS_TOKEN else None
+    if genius_client:
+        logger.info("Genius API: enabled")
+    else:
+        logger.info("Genius API: no token")
+except ImportError:
+    genius_client = None
+    logger.info("Genius API: lyricsgenius not installed")
 
 BASE_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = BASE_DIR / "media_downloads"
