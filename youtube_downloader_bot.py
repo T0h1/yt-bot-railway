@@ -559,7 +559,7 @@ def fetch_lyrics_sync(artist, title):
                 logger.info(f"Lyrics found from lyrics.ovh: {len(lyrics)} chars")
                 return lyrics[:4000]
     except Exception as e:
-        logger.debug(f"lyrics.ovh failed: {e}")
+        logger.info(f"lyrics.ovh failed: {e}")
     
     # Source 2: lyrics.fandom (via MediaWiki API)
     try:
@@ -588,7 +588,7 @@ def fetch_lyrics_sync(artist, title):
                                     logger.info(f"Lyrics found from fandom: {len(lyrics)} chars")
                                     return lyrics[:4000]
     except Exception as e:
-        logger.debug(f"lyrics.fandom failed: {e}")
+        logger.info(f"lyrics.fandom failed: {e}")
 
     # Source 3: Genius API (scrape search page)
     try:
@@ -619,7 +619,7 @@ def fetch_lyrics_sync(artist, title):
                             logger.info(f"Lyrics found from Genius: {len(best_lyrics)} chars")
                             return best_lyrics[:4000]
     except Exception as e:
-        logger.debug(f"Genius failed: {e}")
+        logger.info(f"Genius failed: {e}")
 
     # Source 4: Try simple lyrics API
     try:
@@ -633,7 +633,7 @@ def fetch_lyrics_sync(artist, title):
                     logger.info(f"Lyrics found from textylate: {len(lyrics)} chars")
                     return lyrics[:4000]
     except Exception as e:
-        logger.debug(f"textylate failed: {e}")
+        logger.info(f"textylate failed: {e}")
 
     logger.warning(f"No lyrics found for: {artist_clean} - {title_clean}")
     return None
