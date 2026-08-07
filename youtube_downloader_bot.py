@@ -1184,9 +1184,46 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     tracks = session.get('tracks', [])
 
+    # Download all tracks (must check BEFORE dl_ single track)
+    if data == "dl_all":
+        if not tracks:
+            await query.edit_message_text("❌ لیست آهنگ‌ها خالیه.")
+            return
+        await query.edit_message_text(f"⏳ دانلود {len(tracks)} آهنگ...")
+        success = 0
+        failed = []
+        for i, track in enumerate(tracks):
+            url = track.get('url') or track.get('id')
+            if not url:
+                failed.append(track['title'])
+                continue
+            await context.bot.send_message(chat_id, f"🎵 [{i+1}/{len(tracks)}] {track['title']}")
+            try:
+                output_file, err = await download_audio(url, chat_id, context, track['title'])
+                if output_file:
+                    info = {'title': track['title'], 'artist': track.get('uploader', ''),
+                            'album': '', 'duration': track.get('duration', 0), 'thumbnail': track.get('thumbnail')}
+                    await send_audio_file(chat_id, context, output_file, info)
+                    if output_file.exists():
+                        output_file.unlink()
+                    success += 1
+                else:
+                    failed.append(f"{track['title']}: {err[:50]}")
+            except Exception as e:
+                failed.append(f"{track['title']}: {str(e)[:50]}")
+        msg = f"✅ {success}/{len(tracks)} آهنگ دانلود شد!"
+        if failed:
+            msg += f"\n\n❌ ناموفق ({len(failed)}):\n" + "\n".join(failed[:10])
+        await context.bot.send_message(chat_id, msg)
+        return
+
     # Download single track from artist
     if data.startswith("dl_"):
-        idx = int(data.split("_")[1])
+        try:
+            idx = int(data.split("_")[1])
+        except (ValueError, IndexError):
+            await query.edit_message_text("❌ خطا در پردازش درخواست.")
+            return
         if 0 <= idx < len(tracks):
             track = tracks[idx]
             url = track.get('url') or track.get('id')
@@ -1228,25 +1265,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id=chat_id, text=text,
                                                parse_mode='Markdown', reply_markup=kb)
 
-    # Download all tracks
-    elif data == "dl_all":
-        await query.edit_message_text(f"⏳ دانلود {len(tracks)} آهنگ...")
-        success = 0
-        for i, track in enumerate(tracks):
-            url = track.get('url') or track.get('id')
-            if url:
-                await context.bot.send_message(chat_id, f"🎵 [{i+1}/{len(tracks)}] {track['title']}")
-                output_file, err = await download_audio(url, chat_id, context, track['title'])
-                if output_file:
-                    info = {'title': track['title'], 'artist': track.get('uploader', ''),
-                            'album': '', 'duration': track.get('duration', 0), 'thumbnail': track.get('thumbnail')}
-                    await send_audio_file(chat_id, context, output_file, info)
-                    if output_file.exists():
-                        output_file.unlink()
-                    success += 1
-        await context.bot.send_message(chat_id, f"✅ {success}/{len(tracks)} آهنگ دانلود شد!")
-
-    # Search result click
+    # Search result click (dl_all handled above, before dl_ single track)
     elif data.startswith("search_"):
         idx = int(data.split("_")[1])
         results = session.get('search_results', [])
