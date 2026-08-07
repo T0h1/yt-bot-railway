@@ -603,21 +603,27 @@ def fetch_lyrics_sync(artist, title):
                 if song_url:
                     resp2 = req_lib.get(song_url, timeout=10, headers=headers)
                     if resp2.status_code == 200:
-                        # Get ALL lyric containers and pick the longest one
+                        # Get ALL lyric containers and JOIN them (lyrics split across divs)
                         containers = re.findall(
                             r'data-lyrics-container="true"[^>]*>(.*?)</div>',
                             resp2.text, re.DOTALL
                         )
-                        best_lyrics = ""
+                        all_parts = []
                         for container in containers:
                             cleaned = re.sub(r'<br\s*/?>', '\n', container)
                             cleaned = re.sub(r'<[^>]+>', '', cleaned)
                             cleaned = html.unescape(cleaned).strip()
-                            if len(cleaned) > len(best_lyrics):
-                                best_lyrics = cleaned
-                        if len(best_lyrics) > 20:
-                            logger.info(f"Lyrics found from Genius: {len(best_lyrics)} chars")
-                            return best_lyrics[:4000]
+                            # Skip tiny fragments (headers, ads, empty)
+                            if len(cleaned) > 5:
+                                all_parts.append(cleaned)
+                        if all_parts:
+                            # Skip first container if it's just "N Contributors"
+                            if len(all_parts[0]) < 50 and 'Contributor' in all_parts[0]:
+                                all_parts = all_parts[1:]
+                            best_lyrics = '\n\n'.join(all_parts)
+                            if len(best_lyrics) > 20:
+                                logger.info(f"Lyrics found from Genius: {len(best_lyrics)} chars ({len(all_parts)} parts)")
+                                return best_lyrics[:4000]
     except Exception as e:
         logger.info(f"Genius failed: {e}")
 
