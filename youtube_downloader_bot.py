@@ -19,7 +19,7 @@ import requests as req_lib
 try:
     import lyricsgenius
     GENIUS_TOKEN = os.environ.get('GENIUS_API_TOKEN', '')
-    genius_client = lyricsgenius.Genius(GENIUS_TOKEN, verbose=False) if GENIUS_TOKEN else None
+    genius_client = lyricsgenius.Genius(GENIUS_TOKEN) if GENIUS_TOKEN else None
     logger.info(f"Genius API: {'enabled' if genius_client else 'no token'}")
 except ImportError:
     genius_client = None
