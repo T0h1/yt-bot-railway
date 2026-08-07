@@ -46,7 +46,11 @@ COPY --from=builder /install /usr/local
 COPY --chown=appuser:appuser . .
 
 # Create download directory
-RUN mkdir -p /app/media_downloads && chown appuser:appuser /app/media_downloads
+RUN mkdir -p /app/media_downloads /app/cookie_data /tmp/yt-dlp-cache \
+    && chown appuser:appuser /app/media_downloads /app/cookie_data /tmp/yt-dlp-cache
+
+# Set XDG_CACHE_HOME so yt-dlp doesn't try to write to /app/.cache (root-owned)
+ENV XDG_CACHE_HOME=/tmp/yt-dlp-cache
 
 # Switch to non-root user
 USER appuser
