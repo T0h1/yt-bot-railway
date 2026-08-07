@@ -1702,12 +1702,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_artist_profile(text, update, context)
 
     elif url_type == 'track':
-        # YouTube video → show quality menu
-        if platform == 'YouTube':
+        # YouTube / Instagram / TikTok / Twitter → show quality menu for video
+        if platform in ('YouTube', 'Instagram', 'TikTok', 'Twitter'):
             user_sessions[chat_id] = {'pending_video_url': text}
             await show_quality_menu(text, update, context)
         else:
-            # Audio download for all other platforms
+            # Audio download for SoundCloud and others
             status_msg = await update.message.reply_text(f"🎵 در حال دانلود از {platform}...")
             start_time = time.time()
             try:
