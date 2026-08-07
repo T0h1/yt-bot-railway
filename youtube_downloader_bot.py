@@ -1661,23 +1661,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Check user quota
-    if settings.postgres_dsn:
-        from database import get_database
-        db = await get_database()
-        if db:
-            user = await db.get_or_create_user(user_id, 
-                update.effective_user.username or "",
-                update.effective_user.first_name or "",
-                update.effective_user.last_name or "")
-            
-            if user.get("is_banned"):
-                await update.message.reply_text("❌ شما از استفاده از ربات محروم شده‌اید.")
-                return
-                
-            allowed, remaining = await db.check_user_quota(user_id)
-            if not allowed:
-                await update.message.reply_text(f"❌ سهمیه روزانه شما تمام شده است ({MAX_DOWNLOADS_PER_USER_PER_DAY} دانلود در روز).")
-                return
+    # NOTE: User quota check disabled - get_or_create_user/check_user_quota not implemented in Database class
+    # if settings.postgres_dsn:
+    #     from database import get_database
+    #     db = await get_database()
+    #     if db:
+    #         ... (quota check)
 
     text = update.message.text
     if not text or not text.startswith('http'):
@@ -1725,12 +1714,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             output_file.unlink()
                         await status_msg.edit_text("✅ ارسال شد!")
                         record_download(platform, 'audio', 'success', time.time() - start_time)
-                        # Increment user download count
-                        if settings.postgres_dsn:
-                            from database import get_database
-                            db = await get_database()
-                            if db:
-                                await db.increment_user_downloads(user_id)
+                        # NOTE: User download count increment disabled - increment_user_downloads not implemented
                         break
                     else:
                         if attempt < 2:
