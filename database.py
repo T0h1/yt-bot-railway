@@ -500,6 +500,9 @@ class Database:
 # Global database instance
 
 
+# Global database instance
+_database = None
+
 async def get_database() -> Optional[Database]:
     """Get or create global database instance. Returns None if PostgreSQL not configured."""
     global _database
