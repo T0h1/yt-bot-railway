@@ -226,10 +226,10 @@ def resolve_short_url(url):
             resp = req_lib.head(url, allow_redirects=True, timeout=10)
             resolved = resp.url
             logger.info(f"Resolved {url} → {resolved}")
-            return resolved
+            return strip_query_params(resolved)
         except Exception as e:
             logger.error(f"Resolve failed: {e}")
-    return url
+    return strip_query_params(url)
 
 def strip_query_params(url):
     parsed = urlparse(url)
