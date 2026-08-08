@@ -1,94 +1,133 @@
-# 🚀 Railway Template Deployment Guide
+# 🚀 Railway Deploy Guide
 
-## Prerequisites
+## پیش‌نیازها
 
-- [GitHub account](https://github.com)
-- [Railway account](https://railway.app) (free $5/month credit)
-- Telegram Bot Token from [@BotFather](https://t.me/BotFather)
-- Your Telegram User ID (from [@userinfobot](https://t.me/userinfobot))
-
-## Step 1: Fork Repository
-
-1. Go to https://github.com/T0h1/yt-bot-railway
-2. Click **"Fork"** button (top right)
-3. Wait for fork to complete
-
-## Step 2: Create Railway Project
-
-1. Go to https://railway.app
-2. Click **"New Project"**
-3. Select **"Deploy from GitHub repo"**
-4. Select your **forked repository**
-5. Railway will start building automatically
-
-## Step 3: Set Environment Variables
-
-1. In Railway dashboard, click on your **bot service**
-2. Go to **"Variables"** tab
-3. Click **"New Variable"** and add:
-
-```
-BOT_TOKEN = your_telegram_bot_token_here
-ADMIN_ID = your_telegram_user_id_here
-```
-
-### Optional Variables
-
-```
-GENIUS_API_TOKEN = your_genius_api_token_here
-```
-
-> 💡 Get Genius API token from https://genius.com/api-clients/new
-
-## Step 4: Add PostgreSQL Database (Optional but Recommended)
-
-1. In Railway dashboard, click **"+ New"**
-2. Select **"Database"** → **"PostgreSQL"**
-3. Railway auto-provisions and connects it
-4. Bot detects `DATABASE_URL` automatically
-
-## Step 5: Deploy
-
-1. Railway auto-deploys on every push
-2. Check **"Deployments"** tab for status
-3. Check **"Logs"** tab for "Application started"
-
-## Step 6: Test the Bot
-
-1. Open Telegram
-2. Find your bot by username
-3. Send `/start`
-4. Try downloading a song: send a YouTube/SoundCloud link
+- اکانت [GitHub](https://github.com)
+- اکانت [Railway](https://railway.app) (ماهانه $5 رایگان)
+- توکن ربات تلگرام از [@BotFather](https://t.me/BotFather)
+- آیدی عددی تلگرام از [@userinfobot](https://t.me/userinfobot)
 
 ---
 
-## Troubleshooting
+## قدم ۱: Fork کردن
 
-### Bot not responding
-- Check logs for errors
-- Verify `BOT_TOKEN` is correct
-- Ensure only 1 replica is running
-
-### Lyrics not found
-- Set `GENIUS_API_TOKEN` in Railway Variables
-- Get token from https://genius.com/api-clients/new
-
-### SoundCloud 403 errors
-- Upload SoundCloud cookies via `/cookie` command
-- Or add cookies.txt file
-
-### File too large
-- Bot auto-compresses files >50MB
-- No action needed
+1. برو به https://github.com/T0h1/yt-bot-railway
+2. روی **"Fork"** کلیک کن (بالا سمت راست)
+3. صبر کن تا fork کامل بشه
 
 ---
 
-## Environment Variables Reference
+## قدم ۲: ساخت پروژه Railway
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `BOT_TOKEN` | ✅ | Telegram Bot Token |
-| `ADMIN_ID` | ✅ | Your Telegram User ID |
-| `GENIUS_API_TOKEN` | ❌ | For lyrics fetching |
-| `RATE_LIMIT_PER_MINUTE` | ❌ | Default: 5 |
-| `RATE_LIMIT_PER_HOUR` | ❌ | Default: 20 |
+1. برو به https://railway.app
+2. روی **"New Project"** کلیک کن
+3. **"Deploy from GitHub repo"** رو انتخاب کن
+4. **fork خودت** رو انتخاب کن
+5. Railway خودش build می‌کنه
+
+---
+
+## قدم ۳: تنظیم متغیرها
+
+1. توی dashboard روی **bot service** کلیک کن
+2. بریم به تب **"Variables"**
+3. **"New Variable"** رو بزن و اضافه کن:
+
+```
+BOT_TOKEN = توکن رباتت
+ADMIN_ID = آیدی عددیت
+```
+
+### اختیاری
+
+```
+GENIUS_API_TOKEN = توکن Genius (برای lyrics)
+```
+
+> 💡 توکن Genius از https://genius.com/api-clients/new بگیر
+
+---
+
+## قدم ۴: PostgreSQL (اختیاری)
+
+1. توی Railway dashboard روی **"+ New"** کلیک کن
+2. **"Database"** → **"PostgreSQL"** رو انتخاب کن
+3. Railway خودکار connect می‌کنه
+4. ربات `DATABASE_URL` رو خودکار تشخیص میده
+
+---
+
+## قدم ۵: دیپلوی
+
+1. Railway خودکار deploy می‌کنه
+2. توی تب **"Deployments"** وضعیت رو ببین
+3. توی تب **"Logs"** بگرد دنبال **"Application started"**
+
+---
+
+## قدم ۶: تست
+
+1. تلگرام رو باز کن
+2. رباتت رو پیدا کن
+3. `/start` بفرست
+4. یه لینک YouTube یا SoundCloud بفرست
+
+---
+
+## 🔴 عیب‌یابی
+
+### ربات جواب نمیده
+- لاگ‌ها رو چک کن
+- `BOT_TOKEN` درست باشه
+- فقط **1 replica** داشته باش (Settings → Deployment)
+
+### Lyrics پیدا نمیشه
+- `GENIUS_API_TOKEN` رو تنظیم کن
+- از https://genius.com/api-clients/new بگیر
+
+### SoundCloud 403
+- کوکی آپلود کن: `/cookie` بفرست
+- یا cookies.txt اضافه کن
+
+### فایل خیلی بزرگه
+- ربات **خودکار فشرده می‌کنه** — نیازی به کار نیست
+
+### Conflict error هنگام deploy
+- **عادیه** — بعد از چند ثانیه حل میشه
+- Instance قدیمی متوقف میشه، جدید تنها میمونه
+
+---
+
+## ⚡ Railway Features
+
+### Health Check
+```
+GET /health → 200 OK (برای Railway monitoring)
+```
+
+### Graceful Degradation
+```
+بدون PostgreSQL: تاریخچه و پلی‌لیست غیرفعال
+بدون Redis: Queue غیرفعال
+بدون Genius Token: Lyrics غیرفعال
+```
+
+### Auto Restart
+```
+restartPolicyType: ON_FAILURE
+restartPolicyMaxRetries: 10
+```
+
+---
+
+## 📊 Railway Pricing
+
+| Feature | Free Tier |
+|---------|-----------|
+| Monthly credit | $5 |
+| Hobby plan | $5/mo (بیشتر از credit) |
+| PostgreSQL | $1/mo |
+| Redis | $1/mo |
+| Bot (Hobby) | $5/mo |
+
+> 💡 با credit رایگان $5، ربات + PostgreSQL رایگان اجرا میشه!
