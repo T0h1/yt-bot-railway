@@ -1174,6 +1174,9 @@ def build_artist_page_text(title, description, tracks, page, per_page=5):
         kb.append(nav)
 
     kb.append([InlineKeyboardButton(f"📥 دانلود همه ({len(tracks)})", callback_data="dl_all")])
+    # Add range download button if >5 tracks
+    if len(tracks) > 5:
+        kb.append([InlineKeyboardButton("🔢 دانلود بازه عددی", callback_data="dl_range_prompt")])
     return text, InlineKeyboardMarkup(kb)
 
 async def show_artist_profile(url, update, context, page=0):
@@ -1292,6 +1295,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tracks = session.get('tracks', [])
 
     # Download all tracks (must check BEFORE dl_ single track)
+    # Range download prompt
+    if data == "dl_range_prompt":
+        total = len(tracks)
+        await query.edit_message_text(
+            f"🔢 بازه دانلود رو مشخص کن:\n"
+            f"总计 {total} آهنگ\n\n"
+            f"مثال:\n"
+            f"• `1-10` → آهنگ ۱ تا ۱۰\n"
+            f"• `5-15` → آهنگ ۵ تا ۱۵\n"
+            f"• `20-{total}` → آهنگ ۲۰ تا آخر\n\n"
+            f"فرمت: `شروع-پایان`",
+            parse_mode='Markdown'
+        )
+        # Set state to wait for range input
+        user_sessions[chat_id]['waiting_for'] = 'dl_range_input'
+        return
+
+    # Range download input handler
+    if data == "dl_range_input" or (user_sessions.get(chat_id, {}).get('waiting_for') == 'dl_range_input' and not data.startswith(('dl_', 'page_', 'admin_', 'cookie_', 'vq_', 'like_', 'dislike_', 'preview_', 'search_'))):
+        # This is handled in message handler, skip here
+        pass
+
     if data == "dl_all":
         if not tracks:
             await query.edit_message_text("❌ لیست آهنگ‌ها خالیه.")
@@ -1802,6 +1827,59 @@ async def handle_cookie_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    
+    # Handle range download input
+    session = user_sessions.get(chat_id, {})
+    if session.get('waiting_for') == 'dl_range_input':
+        user_sessions[chat_id]['waiting_for'] = None
+        tracks = session.get('tracks', [])
+        text = update.message.text.strip()
+        if not tracks:
+            await update.message.reply_text("❌ لیست آهنگ‌ها یافت نشد.")
+            return
+        import re as _re
+        range_match = _re.match(r'(\d+)-(\d+)', text)
+        if not range_match:
+            await update.message.reply_text("❌ فرمت اشتباهه. مثال: `1-10`", parse_mode='Markdown')
+            return
+        start = int(range_match.group(1))
+        end = int(range_match.group(2))
+        total = len(tracks)
+        if start < 1 or end > total or start > end:
+            await update.message.reply_text(f"❌ بازه اشتباهه. محدوده: 1-{total}")
+            return
+        selected = tracks[start-1:end]
+        artist_name = session.get('artist_name', 'Unknown')
+        await update.message.reply_text(f"⏳ دانلود {len(selected)} آهنگ ({start}-{end}) از {artist_name}...")
+        success = 0
+        failed = []
+        for i, track in enumerate(selected):
+            url = track.get('url') or track.get('id')
+            if not url:
+                failed.append(track['title'])
+                continue
+            if i > 0:
+                await asyncio.sleep(2)
+            try:
+                output_file, err = await download_audio(url, chat_id, context, track['title'])
+                if output_file:
+                    info = {'title': track['title'], 'artist': track.get('uploader', ''),
+                            'album': '', 'duration': track.get('duration', 0), 'thumbnail': track.get('thumbnail')}
+                    platform = get_platform_name(url) if url else 'Unknown'
+                    hist_id = db_log(url, track['title'], track.get('uploader', ''), '', platform, 'audio', 'success')
+                    await send_audio_file(chat_id, context, output_file, info, hist_id)
+                    if output_file.exists():
+                        output_file.unlink()
+                    success += 1
+                else:
+                    failed.append(f"{track['title']}: {err[:50]}")
+            except Exception as e:
+                failed.append(f"{track['title']}: {str(e)[:50]}")
+        msg = f"✅ {success}/{len(selected)} آهنگ دانلود شد!"
+        if failed:
+            msg += f"\n\n❌ ناموفق ({len(failed)}):\n" + "\n".join(failed[:10])
+        await update.message.reply_text(msg)
+        return
     
     # Check if user is in cookie upload state — handle cookie text input
     if chat_id in _cookie_upload_state:
