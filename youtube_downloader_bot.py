@@ -44,6 +44,7 @@ from database import get_database, close_database
 from download_queue import get_download_queue, close_download_queue, DownloadTask, DownloadStatus
 from cookie_manager import get_cookie_manager, convert_cookies, detect_cookie_format
 from metrics import init_metrics, record_download, record_error, set_active_downloads, set_queue_stats, record_rate_limit, setup_metrics_app
+from scheduler import start_scheduler, stop_scheduler
 from chunked_upload import upload_with_progress
 from admin_dashboard import (
     cmd_admin, cmd_adduser, cmd_removeuser, cmd_listusers,
@@ -2080,7 +2081,10 @@ async def graceful_shutdown(app):
     global _shutdown_requested
     _shutdown_requested = True
     logger.info("shutdown_initiated")
-    
+
+    # Stop scheduler
+    await stop_scheduler()
+
     # Stop download queue worker
     queue = await get_download_queue()
     if queue:
@@ -2199,10 +2203,10 @@ async def main():
     app.add_handler(MessageHandler(filters.Document.ALL, handle_cookie_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Start background tasks
+    # Start background tasks - use APScheduler for proper cron jobs
     loop = asyncio.get_event_loop()
-    loop.create_task(scheduled_cleanup())
-    
+    await start_scheduler()
+
     # Start health check server in background
     loop.create_task(start_health_server())
     

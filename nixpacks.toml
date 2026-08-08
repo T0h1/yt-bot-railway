@@ -1,8 +1,8 @@
-[phases.build]
-cmds = ["pip install -r requirements.txt"]
-
 [phases.setup]
-nixPkgs = ["ffmpeg", "python311", "gcc", "pkg-config", "libpq"]
+nixPkgs = ["ffmpeg", "python311", "gcc", "pkg-config", "libpq", "netcat-openbsd", "curl", "unzip"]
 
-[start]
-cmd = "python3 bot.py"
+[phases.build]
+cmds = ["pip install --no-cache-dir -r requirements.txt"]
+
+[phases.start]
+cmd = "/entrypoint.sh"

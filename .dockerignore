@@ -1,0 +1,73 @@
+# Files and directories to exclude from Docker build context
+# Similar to .gitignore but for Docker builds
+
+# Local development
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+
+# Testing
+tests/
+*.test.py
+conftest.py
+
+# Documentation
+*.md
+!README.md
+!DEPLOY.md
+docs/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Railway specific
+railway.json
+nixpacks.toml
+Dockerfile
+entrypoint.sh
+.railwayignore
+
+# Data directories (will be created at runtime)
+media_downloads/
+cookie_data/
+yt-dlp-cache/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+
+# Backup files
+*.bak
+*.backup
+
+# Large files not needed for deployment
+*.zip
+*.tar.gz
+*.whl
+
+# Git
+.git/
+.gitignore

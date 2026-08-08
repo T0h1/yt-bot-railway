@@ -38,5 +38,8 @@ pydub>=0.25
 # Type hints (for development)
 typing-extensions>=4.8
 
+# Scheduler for in-app cron jobs (daily cleanup, stats, etc.)
+apscheduler>=3.10
+
 # Genius lyrics API
 lyricsgenius>=1.1

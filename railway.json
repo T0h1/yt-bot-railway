@@ -1,13 +1,59 @@
 {
-  "$schema": "https://railway.app/railway.schema.json",
+  "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "DOCKERFILE",
+    "watchPatterns": [
+      "*.py",
+      "requirements.txt",
+      "Dockerfile",
+      "nixpacks.toml",
+      "pyproject.toml"
+    ]
   },
   "deploy": {
-    "restartPolicyType": "ON_FAILURE",
+    "startCommand": "python bot.py",
+    "preDeployCommand": [
+      "python -c \"import asyncio; from database import _init_db; asyncio.run(_init_db())\""
+    ],
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 60,
+    "restartPolicyType": "ALWAYS",
     "restartPolicyMaxRetries": 10,
     "numReplicas": 1,
-    "healthcheckPath": "/health",
-    "healthcheckTimeout": 30
+    "drainingSeconds": 15,
+    "overlapSeconds": 30,
+    "sleepApplication": false,
+    "runtime": "V2",
+    "limitOverride": {
+      "containers": {
+        "cpu": 1000,
+        "memoryBytes": 2147483648,
+        "diskBytes": 5368709120
+      }
+    }
+  },
+  "environments": {
+    "production": {
+      "deploy": {
+        "restartPolicyType": "ALWAYS",
+        "restartPolicyMaxRetries": 10,
+        "numReplicas": 1
+      }
+    },
+    "staging": {
+      "deploy": {
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 3,
+        "numReplicas": 1,
+        "sleepApplication": true
+      }
+    },
+    "pr": {
+      "deploy": {
+        "restartPolicyType": "NEVER",
+        "numReplicas": 1,
+        "healthcheckPath": "/health"
+      }
+    }
   }
 }

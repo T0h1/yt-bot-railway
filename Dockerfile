@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     gcc \
     libpq-dev \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -21,12 +22,13 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # Runtime stage - minimal distroless-like image
 FROM python:3.11-slim AS runtime
 
-# Install only runtime dependencies (ffmpeg + libpq for asyncpg + curl for deno install)
+# Install only runtime dependencies (ffmpeg + libpq for asyncpg + netcat for DB wait)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libpq5 \
     unzip \
     curl \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Install deno for yt-dlp YouTube n-challenge solving
@@ -45,7 +47,11 @@ COPY --from=builder /install /usr/local
 # Copy application code
 COPY --chown=appuser:appuser . .
 
-# Create download directory
+# Copy entrypoint script
+COPY --chown=appuser:appuser entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Create download directories
 RUN mkdir -p /app/media_downloads /app/cookie_data /tmp/yt-dlp-cache \
     && chown appuser:appuser /app/media_downloads /app/cookie_data /tmp/yt-dlp-cache
 
@@ -58,9 +64,9 @@ USER appuser
 # Expose port (Railway sets PORT env var)
 EXPOSE 8080
 
-# Health check
+# Health check - use the /health endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python3 -c "import requests; requests.get('http://localhost:8080/health', timeout=5)" || exit 1
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=5)" || exit 1
 
-# Run the bot
-CMD ["python3", "bot.py"]
+# Run the bot via entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
