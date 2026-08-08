@@ -539,42 +539,50 @@ def embed_metadata_ffmpeg(input_path, output_path, info, lyrics=None):
     return output_file
 
 def fetch_lyrics_sync(artist, title):
-    """Fetch lyrics from multiple sources with fallback"""
-    # Clean artist/title for better search results
-    artist_clean = re.sub(r'[，。、；：！？（）【】「」《》""''…—]', ' ', artist).strip()
-    artist_clean = re.sub(r'\s+', ' ', artist_clean)
-    title_clean = re.sub(r'[，。、；：！？（）【】「」《》""''…—]', ' ', title).strip()
-    title_clean = re.sub(r'\s+', ' ', title_clean)
+    """Fetch lyrics from multiple sources with fallback.
+    Strategy: 
+    1. First try: main_artist + song_title (e.g., "Hiphopologist Baadpooli")
+    2. If not found: song_title only (e.g., "Baadpooli")
+    """
+    # Extract main artist (first name before x, X, &, feat., etc.)
+    main_artist = artist
+    for sep in [' x ', ' X ', ' & ', ' × ', ' feat. ', ' ft. ', 'Feat. ', ' Ft. ', '，', ',']:
+        if sep in main_artist:
+            main_artist = main_artist.split(sep)[0].strip()
+            break
     
-    # Remove common suffixes that break search
+    # Clean artist
+    artist_clean = re.sub(r'[，。、；：！？（）【】「」《》""''…—]', ' ', artist).strip()
+    artist_clean = re.sub(r'\\s+', ' ', artist_clean)
+    main_artist_clean = re.sub(r'[，。、；：！？（）【】「」《》""''…—]', ' ', main_artist).strip()
+    main_artist_clean = re.sub(r'\\s+', ' ', main_artist_clean)
+    
+    # Clean title
+    title_clean = re.sub(r'[，。、；：！？（）【】「」《》""''…—]', ' ', title).strip()
+    title_clean = re.sub(r'\\s+', ' ', title_clean)
+    
+    # Remove common suffixes
     for suffix in ['Official Video', 'Official Audio', 'Lyrics', 'Music Video', 
                    'Official Music Video', 'Audio', 'Video', 'HD', '4K',
                    '(Official Video)', '(Official Audio)', '(Lyrics)', 
                    '[Official Video]', '[Official Audio]', '[Lyrics]']:
         title_clean = title_clean.replace(suffix, '').strip()
     
-    # Remove producer tags: [Prod. ...], (Prod. ...), [Produced by ...]
-    title_clean = re.sub(r'\[prod\.?.*?\]', '', title_clean, flags=re.IGNORECASE).strip()
-    title_clean = re.sub(r'\(prod\.?.*?\)', '', title_clean, flags=re.IGNORECASE).strip()
-    # Remove any remaining brackets content like [Remix], [Clean], etc.
-    title_clean = re.sub(r'\[.*?\]', '', title_clean).strip()
-    title_clean = re.sub(r'\(.*?\)', '', title_clean).strip()
-    # Remove "Feat." / "ft." variations
-    title_clean = re.sub(r'\s*(feat\.|ft\.|featuring)\s*.*', '', title_clean, flags=re.IGNORECASE).strip()
+    # Remove producer/feature tags
+    title_clean = re.sub(r'\\[prod\\..*?\\]', '', title_clean, flags=re.IGNORECASE).strip()
+    title_clean = re.sub(r'\\(prod\\..*?\\)', '', title_clean, flags=re.IGNORECASE).strip()
+    title_clean = re.sub(r'\\[.*?\\]', '', title_clean).strip()
+    title_clean = re.sub(r'\\(.*?\\)', '', title_clean).strip()
+    title_clean = re.sub(r'\\s*(feat\\.|ft\\.|featuring)\\s*.*', '', title_clean, flags=re.IGNORECASE).strip()
     
-    # Extract just the song title from "Artist x Artist - SongTitle" format
-    # If title still contains artist names with x/&/- separators, take the last part
+    # Extract just song title from "Artist x Artist - SongTitle" format
     if ' - ' in title_clean:
         parts = title_clean.split(' - ')
-        # Take the part after the LAST " - " (that's the actual song title)
         candidate = parts[-1].strip()
         if len(candidate) > 2:
             title_clean = candidate
-    # Also clean: "Artist1 x Artist2 SongName" → "SongName" 
-    # If title starts with known artist name pattern
     for sep in [' x ', ' X ', ' & ', ' × ']:
         if sep in title_clean:
-            # Take the last segment
             parts = title_clean.split(sep)
             candidate = parts[-1].strip()
             if len(candidate) > 2:
@@ -585,91 +593,100 @@ def fetch_lyrics_sync(artist, title):
         'Accept': 'application/json',
     }
     
-    logger.info(f"Searching lyrics for: {artist_clean} - {title_clean}")
+    # Two-pass search: first with main_artist + title, then title only
+    search_combos = [
+        (main_artist_clean, title_clean, f"{main_artist_clean} + {title_clean}"),
+        (title_clean, '', f"{title_clean} (title only)"),
+    ]
     
-    # Source 1: lyrics.ovh (most reliable)
-    try:
-        search_artist = artist_clean.replace(' ', '%20')
-        search_title = title_clean.replace(' ', '%20')
-        resp = req_lib.get(f"https://api.lyrics.ovh/v1/{search_artist}/{search_title}", timeout=10, headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            lyrics = data.get('lyrics', '')
-            if lyrics and len(lyrics) > 10:
-                logger.info(f"Lyrics found from lyrics.ovh: {len(lyrics)} chars")
-                return lyrics[:4000]
-    except Exception as e:
-        logger.info(f"lyrics.ovh failed: {e}")
-    
-    # Source 2: lyrics.fandom (via MediaWiki API)
-    try:
-        search_url = f"https://lyrics.fandom.com/api.php?action=query&list=search&srsearch={artist_clean}%20{title_clean}&format=json"
-        resp = req_lib.get(search_url, timeout=10, headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            results = data.get('query', {}).get('search', [])
-            if results:
-                page_title = results[0].get('title', '')
-                if page_title:
-                    lyrics_url = f"https://lyrics.fandom.com/api.php?action=query&titles={page_title.replace(' ', '%20')}&prop=revisions&rvprop=content&format=json"
-                    resp2 = req_lib.get(lyrics_url, timeout=10, headers=headers)
-                    if resp2.status_code == 200:
-                        data2 = resp2.json()
-                        pages = data2.get('query', {}).get('pages', {})
-                        for page_id, page_data in pages.items():
-                            revisions = page_data.get('revisions', [])
-                            if revisions:
-                                content = revisions[0].get('*', '')
-                                lyrics = content.replace('[[', '').replace(']]', '')
-                                lyrics = re.sub(r'\[.*?\]', '', lyrics)
-                                lyrics = re.sub(r'\{\{.*?\}\}', '', lyrics, flags=re.DOTALL)
-                                lyrics = lyrics.strip()
-                                if len(lyrics) > 20:
-                                    logger.info(f"Lyrics found from fandom: {len(lyrics)} chars")
-                                    return lyrics[:4000]
-    except Exception as e:
-        logger.info(f"lyrics.fandom failed: {e}")
-
-    # Source 3: Try Genius API (via lyricsgenius) - returns lyrics + metadata
-    global _genius_metadata
-    _genius_metadata = {}
-    if genius_client:
+    for search_artist, search_title, search_label in search_combos:
+        logger.info(f"Searching lyrics ({search_label}): {artist_clean} - {title_clean}")
+        
+        # Source 1: lyrics.ovh
         try:
-            song = genius_client.search_song(title_clean, artist_clean)
-            if song and song.lyrics:
-                lyrics = song.lyrics
-                lyrics = re.sub(r'^\[متن آهنگ.*?\]\s*', '', lyrics).strip()
-                # Extract album name from Genius
-                album_info = song.album
-                if isinstance(album_info, dict) and album_info.get('name'):
-                    _genius_metadata['album'] = album_info['name']
-                    logger.info(f"Genius album: {album_info['name']}")
-                # Extract year
-                if isinstance(album_info, dict) and album_info.get('release_date_for_display'):
-                    _genius_metadata['year'] = album_info['release_date_for_display']
-                if len(lyrics) > 20:
-                    logger.info(f"Lyrics found from Genius API: {len(lyrics)} chars")
+            sa = search_artist.replace(' ', '%20')
+            st = search_title.replace(' ', '%20') if search_title else sa
+            url = f"https://api.lyrics.ovh/v1/{sa}/{st}" if search_title else f"https://api.lyrics.ovh/v1/{sa}"
+            resp = req_lib.get(url, timeout=10, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                lyrics = data.get('lyrics', '')
+                if lyrics and len(lyrics) > 10:
+                    logger.info(f"Lyrics found from lyrics.ovh: {len(lyrics)} chars")
                     return lyrics[:4000]
         except Exception as e:
-            logger.info(f"Genius API failed: {e}")
-
-    # Source 4: Try simple lyrics API
-    try:
-        resp = req_lib.get(f"https://api.textylate.com/api/lyrics?q={artist_clean}%20{title_clean}", timeout=10, headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, list) and len(data) > 0:
-                lyrics_lines = [item.get('lyrics', '') for item in data if item.get('lyrics')]
-                lyrics = '\n'.join(lyrics_lines)
-                if len(lyrics) > 20:
-                    logger.info(f"Lyrics found from textylate: {len(lyrics)} chars")
-                    return lyrics[:4000]
-    except Exception as e:
-        logger.info(f"textylate failed: {e}")
-
+            logger.info(f"lyrics.ovh failed: {e}")
+        
+        # Source 2: lyrics.fandom
+        try:
+            search_q = f"{search_artist} {search_title}" if search_title else search_artist
+            search_url = f"https://lyrics.fandom.com/api.php?action=query&list=search&srsearch={search_q.replace(chr(32), chr(37)+chr(50)+chr(48))}&format=json"
+            resp = req_lib.get(search_url, timeout=10, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                results = data.get('query', {}).get('search', [])
+                if results:
+                    page_title = results[0].get('title', '')
+                    if page_title:
+                        lyrics_url = f"https://lyrics.fandom.com/api.php?action=query&titles={page_title.replace(' ', chr(37)+chr(52)+chr(48))}&prop=revisions&rvprop=content&format=json"
+                        resp2 = req_lib.get(lyrics_url, timeout=10, headers=headers)
+                        if resp2.status_code == 200:
+                            data2 = resp2.json()
+                            pages = data2.get('query', {}).get('pages', {})
+                            for page_id, page_data in pages.items():
+                                revisions = page_data.get('revisions', [])
+                                if revisions:
+                                    fc = revisions[0].get('*', '')
+                                    lyrics = fc.replace('[[', '').replace(']]', '')
+                                    lyrics = re.sub(r'\\[.*?\\]', '', lyrics)
+                                    lyrics = re.sub(r'\\{\\{.*?\\}\\}', '', lyrics, flags=re.DOTALL)
+                                    lyrics = lyrics.strip()
+                                    if len(lyrics) > 20:
+                                        logger.info(f"Lyrics found from fandom: {len(lyrics)} chars")
+                                        return lyrics[:4000]
+        except Exception as e:
+            logger.info(f"lyrics.fandom failed: {e}")
+        
+        # Source 3: Genius API
+        global _genius_metadata
+        _genius_metadata = {}
+        if genius_client:
+            try:
+                song = genius_client.search_song(search_title if search_title else search_artist, search_artist if search_title else '')
+                if song and song.lyrics:
+                    lyrics = song.lyrics
+                    lyrics = re.sub(r'^\\[متن آهنگ.*?\\]\\s*', '', lyrics).strip()
+                    album_info = song.album
+                    if isinstance(album_info, dict) and album_info.get('name'):
+                        _genius_metadata['album'] = album_info['name']
+                        logger.info(f"Genius album: {album_info['name']}")
+                    if isinstance(album_info, dict) and album_info.get('release_date_for_display'):
+                        _genius_metadata['year'] = album_info['release_date_for_display']
+                    if len(lyrics) > 20:
+                        logger.info(f"Lyrics found from Genius API: {len(lyrics)} chars")
+                        return lyrics[:4000]
+            except Exception as e:
+                logger.info(f"Genius API failed: {e}")
+        
+        # Source 4: textylate
+        try:
+            tl_q = f"{search_artist} {search_title}" if search_title else search_artist
+            resp = req_lib.get(f"https://api.textylate.com/api/lyrics?q={tl_q.replace(chr(32), chr(37)+chr(50)+chr(48))}", timeout=10, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    lyrics_lines = [item.get('lyrics', '') for item in data if item.get('lyrics')]
+                    lyrics = chr(10).join(lyrics_lines)
+                    if len(lyrics) > 20:
+                        logger.info(f"Lyrics found from textylate: {len(lyrics)} chars")
+                        return lyrics[:4000]
+        except Exception as e:
+            logger.info(f"textylate failed: {e}")
+    
     logger.warning(f"No lyrics found for: {artist_clean} - {title_clean}")
     return None
 
+# ==================== AUDIO PREVIEW ====================
 # ==================== AUDIO PREVIEW ====================
 def create_preview(input_path, output_path, duration=30):
     cmd = ['ffmpeg', '-y', '-i', str(input_path), '-ss', '0', '-t', str(duration),
