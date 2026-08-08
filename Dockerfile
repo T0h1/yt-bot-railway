@@ -2,8 +2,9 @@
 # Builder stage - install dependencies and build
 FROM python:3.11-slim AS builder
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install system dependencies with retry
+RUN for i in 1 2 3; do apt-get update && break || sleep 5; done && \
+    apt-get install -y --no-install-recommends \
     ffmpeg \
     gcc \
     libpq-dev \
@@ -22,8 +23,9 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # Runtime stage - minimal distroless-like image
 FROM python:3.11-slim AS runtime
 
-# Install only runtime dependencies (ffmpeg + libpq for asyncpg + netcat for DB wait)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install only runtime dependencies with retry
+RUN for i in 1 2 3; do apt-get update && break || sleep 5; done && \
+    apt-get install -y --no-install-recommends \
     ffmpeg \
     libpq5 \
     unzip \
@@ -32,8 +34,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install deno for yt-dlp YouTube n-challenge solving
-RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
+RUN for i in 1 2 3; do curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && break || sleep 5; done && \
     chmod +x /usr/local/bin/deno && \
+    for i in 1 2 3; do apt-get update && break || sleep 5; done && \
     apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
