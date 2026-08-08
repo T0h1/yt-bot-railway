@@ -69,6 +69,8 @@ except ImportError:
     genius_client = None
     logger.info("Genius API: lyricsgenius not installed")
 
+_genius_metadata = {}  # Stores album/year from Genius during lyrics fetch
+
 BASE_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = BASE_DIR / "media_downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
@@ -367,10 +369,14 @@ def embed_metadata_ffmpeg(input_path, output_path, info, lyrics=None):
     
     # Get album - try multiple sources, exclude junk values
     album = info.get('album') or ''
+    # Skip junk album values
+    junk_albums = {'', 'unknown', 'youtube', 'telegram', 'music', 'none', 'na', 'n/a'}
+    if album.lower().strip() in junk_albums:
+        album = ''
     playlist = info.get('playlist_title') or ''
     series = info.get('series') or ''
     # Use playlist as album only if it looks like an album (not a channel name)
-    if not album and playlist and playlist.lower() not in ('', 'unknown', 'youtube', 'telegram', 'music'):
+    if not album and playlist and playlist.lower() not in junk_albums:
         album = playlist
     if not album and series:
         album = series
@@ -606,15 +612,23 @@ def fetch_lyrics_sync(artist, title):
     except Exception as e:
         logger.info(f"lyrics.fandom failed: {e}")
 
-    # Source 3: Genius API (scrape search page)
-        # Source 3: Try Genius API (via lyricsgenius)
+    # Source 3: Try Genius API (via lyricsgenius) - returns lyrics + metadata
+    global _genius_metadata
+    _genius_metadata = {}
     if genius_client:
         try:
             song = genius_client.search_song(title_clean, artist_clean)
             if song and song.lyrics:
                 lyrics = song.lyrics
-                # Clean header: [متن آهنگ «...» از ...]
                 lyrics = re.sub(r'^\[متن آهنگ.*?\]\s*', '', lyrics).strip()
+                # Extract album name from Genius
+                album_info = song.album
+                if isinstance(album_info, dict) and album_info.get('name'):
+                    _genius_metadata['album'] = album_info['name']
+                    logger.info(f"Genius album: {album_info['name']}")
+                # Extract year
+                if isinstance(album_info, dict) and album_info.get('release_date_for_display'):
+                    _genius_metadata['year'] = album_info['release_date_for_display']
                 if len(lyrics) > 20:
                     logger.info(f"Lyrics found from Genius API: {len(lyrics)} chars")
                     return lyrics[:4000]
@@ -703,6 +717,18 @@ async def download_audio(url, chat_id, context, title_override=None, progress_ms
         )
         if lyrics:
             logger.info(f"Lyrics found for {title}: {len(lyrics)} chars")
+        
+        # Override album with Genius data if available
+        if _genius_metadata.get('album'):
+            info['album'] = _genius_metadata['album']
+            logger.info(f"Album from Genius: {info['album']}")
+        if _genius_metadata.get('year'):
+            upload_date = _genius_metadata['year']
+            # Extract year from "March 6, 2025" format
+            import re as _re
+            year_match = _re.search(r'\b(\d{4})\b', upload_date)
+            if year_match:
+                info['upload_date'] = year_match.group(1)
 
         # embed_metadata_ffmpeg returns the actual output file path
         actual_output = await asyncio.get_event_loop().run_in_executor(
