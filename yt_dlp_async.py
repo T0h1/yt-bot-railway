@@ -91,6 +91,7 @@ def _extract_info_sync(url: str, extra_opts: Optional[Dict] = None) -> Optional[
 
     cookie_file = _find_cookie_file(platform)
 
+    from yt_dlp.networking.impersonate import ImpersonateTarget
     opts = {
         'quiet': True,
         'no_warnings': True,
@@ -98,6 +99,7 @@ def _extract_info_sync(url: str, extra_opts: Optional[Dict] = None) -> Optional[
         'noplaylist': True,
         'cookiefile': cookie_file,
         'remote_components': {'ejs': 'github'},
+        'impersonate': ImpersonateTarget.from_str('chrome'),
     }
     if extra_opts:
         opts.update(extra_opts)
@@ -117,6 +119,7 @@ def _extract_info_sync(url: str, extra_opts: Optional[Dict] = None) -> Optional[
 
 def _extract_artist_tracks_sync(url: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
     """Synchronous artist/playlist track extraction with retry on 403."""
+    from yt_dlp.networking.impersonate import ImpersonateTarget
     # Detect platform
     platform = ""
     if "youtube.com" in url or "youtu.be" in url:
@@ -133,6 +136,7 @@ def _extract_artist_tracks_sync(url: str, max_retries: int = 3) -> Optional[Dict
         'noplaylist': True,
         'cookiefile': cookie_file,
         'remote_components': {'ejs': 'github'},
+        'impersonate': ImpersonateTarget.from_str('chrome'),
     }
     import time
     info = None
@@ -215,6 +219,7 @@ def _download_audio_sync(url: str, output_dir: str) -> Optional[str]:
 
     cookie_file = _find_cookie_file(platform)
 
+    from yt_dlp.networking.impersonate import ImpersonateTarget
     ydl_opts = {
         'outtmpl': os.path.join(output_dir, 'temp_audio.%(ext)s'),
         'format': 'bestaudio/best',
@@ -222,6 +227,7 @@ def _download_audio_sync(url: str, output_dir: str) -> Optional[str]:
         'noplaylist': True,
         'cookiefile': cookie_file,
         'remote_components': {'ejs': 'github'},
+        'impersonate': ImpersonateTarget.from_str('chrome'),
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -245,11 +251,13 @@ def _download_video_sync(url: str, output_dir: str, format_str: str) -> Optional
 
     cookie_file = _find_cookie_file(platform)
 
+    from yt_dlp.networking.impersonate import ImpersonateTarget
     ydl_opts = {
         'outtmpl': os.path.join(output_dir, 'temp_video.%(ext)s'),
         'format': format_str,
         'merge_output_format': 'mp4',
         'remote_components': {'ejs': 'github'},
+        'impersonate': ImpersonateTarget.from_str('chrome'),
         'quiet': True,
         'cookiefile': cookie_file,
     }

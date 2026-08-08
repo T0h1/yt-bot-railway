@@ -43,3 +43,4 @@ apscheduler>=3.10
 
 # Genius lyrics API
 lyricsgenius>=1.1
+curl_cffi==0.15.0
