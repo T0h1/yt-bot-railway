@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     max_storage_mb: int = Field(default=400, description="Max storage in MB before cleanup")
 
     # Optional: External services - only used if provided
-    redis_url: str = Field(default="", description="Redis URL for rate limiting/queue")
-    postgres_dsn: str = Field(default="", description="PostgreSQL DSN for persistent storage")
+    redis_url: str = Field(default="", description="Redis URL for rate limiting/queue", validation_alias="REDIS_URL")
+    postgres_dsn: str = Field(default="", description="PostgreSQL DSN for persistent storage", validation_alias="DATABASE_URL")
     sentry_dsn: str = Field(default="", description="Sentry DSN for error tracking")
     spotify_client_id: str = Field(default="", description="Spotify API Client ID")
     spotify_client_secret: str = Field(default="", description="Spotify API Client Secret")
