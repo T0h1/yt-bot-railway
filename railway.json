@@ -5,6 +5,41 @@
   },
   "deploy": {
     "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 5
+    "restartPolicyMaxRetries": 5,
+    "startCommand": null,
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 10
+  },
+  "services": {
+    "bot": {
+      "source": {
+        "repo": "https://github.com/T0h1/yt-bot-railway"
+      },
+      "variables": {
+        "BOT_TOKEN": "{BOT_TOKEN}",
+        "ADMIN_ID": "{ADMIN_ID}",
+        "GENIUS_API_TOKEN": "{GENIUS_API_TOKEN}",
+        "DB_PATH": "/tmp/bot.db",
+        "XDG_CACHE_HOME": "/tmp/yt-dlp-cache"
+      },
+      "volume": {
+        "mountPath": "/tmp",
+        "name": "bot-cache"
+      }
+    },
+    "postgres": {
+      "source": {
+        "image": "postgres:16"
+      },
+      "variables": {
+        "POSTGRES_USER": "botuser",
+        "POSTGRES_PASSWORD": "{PGPASSWORD}",
+        "POSTGRES_DB": "ytbot"
+      },
+      "volume": {
+        "mountPath": "/var/lib/postgresql/data",
+        "name": "postgres-data"
+      }
+    }
   }
 }
