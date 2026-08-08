@@ -745,11 +745,44 @@ async def download_audio(url, chat_id, context, title_override=None, progress_ms
         if not output_file.exists():
             return None, "خطا در پردازش فایل"
 
-        # Check file size
+        # Check file size - auto-compress if too large for Telegram
         file_size = output_file.stat().st_size
         if file_size > TELEGRAM_MAX_FILE:
-            output_file.unlink()
-            return None, f"فایل خیلی بزرگه ({file_size // (1024*1024)}MB)"
+            compressed = DOWNLOAD_DIR / f"compressed_{safe_title}.mp3"
+            # Calculate appropriate bitrate based on duration
+            duration = info.get('duration', 300)
+            # Target: fit in 48MB (leave 2MB headroom)
+            target_bytes = 48 * 1024 * 1024
+            target_bitrate_bps = int((target_bytes * 8) / max(duration, 60))
+            if target_bitrate_bps > 320000:
+                target_bitrate = '320k'
+            elif target_bitrate_bps > 192000:
+                target_bitrate = '192k'
+            elif target_bitrate_bps > 128000:
+                target_bitrate = '128k'
+            else:
+                target_bitrate = '96k'
+            
+            compress_cmd = ['ffmpeg', '-y', '-i', str(output_file),
+                          '-b:a', target_bitrate, '-ar', '44100', '-id3v2_version', '3',
+                          str(compressed)]
+            try:
+                subprocess.run(compress_cmd, capture_output=True, timeout=120)
+                if compressed.exists() and compressed.stat().st_size <= TELEGRAM_MAX_FILE:
+                    output_file.unlink()
+                    output_file = compressed
+                    logger.info(f"Compressed {file_size // (1024*1024)}MB to {output_file.stat().st_size // (1024*1024)}MB ({target_bitrate})")
+                else:
+                    if compressed.exists():
+                        compressed.unlink()
+                    output_file.unlink()
+                    return None, f"فایل خیلی بزرگه ({file_size // (1024*1024)}MB)"
+            except Exception as e:
+                logger.error(f"Compression failed: {e}")
+                if compressed.exists():
+                    compressed.unlink()
+                output_file.unlink()
+                return None, f"فایل خیلی بزرگه ({file_size // (1024*1024)}MB)"
 
         return output_file, None
     except Exception as e:
@@ -1281,6 +1314,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(chat_id, f"🎵 [{i+1}/{total}] {track['title']}...")
                 except Exception:
                     pass
+            # Delay between downloads to avoid rate limiting (SoundCloud 403)
+            if i > 0:
+                await asyncio.sleep(2)
             try:
                 output_file, err = await download_audio(url, chat_id, context, track['title'])
                 if output_file:
@@ -1317,7 +1353,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             url = track.get('url') or track.get('id')
             if url:
                 await query.edit_message_text(f"⏳ در حال دانلود: {track['title']}...")
+                # Retry once on failure (SoundCloud 403)
                 output_file, err = await download_audio(url, chat_id, context, track['title'])
+                if not output_file and '403' in str(err):
+                    await asyncio.sleep(3)
+                    output_file, err = await download_audio(url, chat_id, context, track['title'])
                 if output_file:
                     info = {'title': track['title'], 'artist': track.get('uploader', ''),
                             'album': '', 'duration': track.get('duration', 0), 'thumbnail': track.get('thumbnail')}
