@@ -1273,7 +1273,14 @@ async def show_artist_profile(url, update, context, page=0):
 
     try:
         resolved = resolve_short_url(url)
-        data = await extract_artist_tracks_async(resolved)
+        data = None
+        for attempt in range(3):
+            data = await extract_artist_tracks_async(resolved)
+            if data and data.get('tracks'):
+                break
+            if attempt < 2:
+                await asyncio.sleep(3 if attempt == 0 else 5)
+                logger.info("artist_profile_retry", attempt=attempt + 1, url=resolved)
 
         if not data or not data.get('tracks'):
             await status_msg.edit_text("❌ اطلاعات آرتیست یافت نشد.")

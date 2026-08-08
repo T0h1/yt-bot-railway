@@ -102,12 +102,21 @@ def _extract_info_sync(url: str, extra_opts: Optional[Dict] = None) -> Optional[
     if extra_opts:
         opts.update(extra_opts)
 
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=False)
+    import time
+    for attempt in range(3):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(url, download=False)
+        except Exception as e:
+            if '403' in str(e) and attempt < 2:
+                time.sleep(3 + attempt * 2)
+                continue
+            raise
+    return None
 
 
-def _extract_artist_tracks_sync(url: str) -> Optional[Dict[str, Any]]:
-    """Synchronous artist/playlist track extraction."""
+def _extract_artist_tracks_sync(url: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+    """Synchronous artist/playlist track extraction with retry on 403."""
     # Detect platform
     platform = ""
     if "youtube.com" in url or "youtu.be" in url:
@@ -125,10 +134,20 @@ def _extract_artist_tracks_sync(url: str) -> Optional[Dict[str, Any]]:
         'cookiefile': cookie_file,
         'remote_components': {'ejs': 'github'},
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        if not info:
-            return None
+    import time
+    info = None
+    for attempt in range(max_retries):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                break
+        except Exception as e:
+            if '403' in str(e) and attempt < max_retries - 1:
+                time.sleep(3 + attempt * 2)
+                continue
+            raise
+    if not info:
+        return None
         entries = info.get('entries', [])
         tracks = []
         for i, entry in enumerate(entries):
