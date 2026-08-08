@@ -97,6 +97,7 @@ def _extract_info_sync(url: str, extra_opts: Optional[Dict] = None) -> Optional[
         'skip_download': True,
         'noplaylist': True,
         'cookiefile': cookie_file,
+        'remote_components': {'ejs': 'github'},
     }
     if extra_opts:
         opts.update(extra_opts)
@@ -120,8 +121,9 @@ def _extract_artist_tracks_sync(url: str) -> Optional[Dict[str, Any]]:
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
-        'extract_flat': True,
+        'noplaylist': True,
         'cookiefile': cookie_file,
+        'remote_components': {'ejs': 'github'},
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -200,6 +202,7 @@ def _download_audio_sync(url: str, output_dir: str) -> Optional[str]:
         'quiet': True,
         'noplaylist': True,
         'cookiefile': cookie_file,
+        'remote_components': {'ejs': 'github'},
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -227,6 +230,7 @@ def _download_video_sync(url: str, output_dir: str, format_str: str) -> Optional
         'outtmpl': os.path.join(output_dir, 'temp_video.%(ext)s'),
         'format': format_str,
         'merge_output_format': 'mp4',
+        'remote_components': {'ejs': 'github'},
         'quiet': True,
         'cookiefile': cookie_file,
     }
