@@ -1,110 +1,151 @@
 # 🎵 YouTube/SoundCloud Media Bot
 
-A Telegram bot for downloading music and videos from YouTube, SoundCloud, Instagram, TikTok, Twitter, Facebook, and Twitch.
+A powerful Telegram bot for downloading music and videos from YouTube, SoundCloud, Instagram, TikTok, Twitter, Facebook, and Twitch.
+
+[![Deploy to Railway](https://railway.app/button.svg)](https://railway.app/template/yt-bot-railway)
 
 ## ✨ Features
 
-- 🎵 **Audio Download** - High quality MP3 320kbps with metadata
+- 🎵 **Audio Download** - Highest quality MP3 320kbps with metadata
 - 🎬 **Video Download** - Quality selection (1080p/720p/480p/360p)
 - 🖼️ **Album Art** - Automatic cover art embedding
-- 📝 **Lyrics** - Auto-fetch and embed lyrics in audio files
+- 📝 **Lyrics** - Auto-fetch lyrics from Genius API (lyricsgenius)
 - 🎭 **Multi-platform** - YouTube, SoundCloud, Instagram, TikTok, Twitter, Facebook, Twitch
 - 📊 **Progress Bar** - Real-time download progress
 - ❤️ **Like/Dislike** - Rate songs
 - 📜 **History** - Download history
 - 🔍 **Search** - Search for artists on SoundCloud
+- 👑 **Admin Dashboard** - Inline keyboard admin panel
+- 🚦 **Rate Limiting** - 3-tier rate limit (per-minute, per-hour, per-day)
 - 🧹 **Auto-cleanup** - Files deleted after upload
+- 📱 **Range Download** - Download specific range of artist tracks
 
 ## 🚀 Deploy to Railway
 
-### Prerequisites
-- GitHub account
-- Railway account (https://railway.app)
-- Telegram Bot Token (from @BotFather)
+### One-Click Deploy
 
-### Steps
+[![Deploy to Railway](https://railway.app/button.svg)](https://railway.app/template/yt-bot-railway)
 
-1. **Fork or clone this repository**
+### Manual Deploy
 
-2. **Create a new Railway project**
+1. **Fork this repository**
+   ```bash
+   https://github.com/T0h1/yt-bot-railway/fork
+   ```
+
+2. **Create Railway project**
    - Go to https://railway.app
-   - Click "New Project"
-   - Select "Deploy from GitHub repo"
-   - Select this repository
+   - Click "New Project" → "Deploy from GitHub repo"
+   - Select your fork
 
 3. **Set Environment Variables**
-   - In Railway dashboard, go to "Variables" tab
-   - Add:
-     ```
-     BOT_TOKEN=your_telegram_bot_token_here
-     ADMIN_ID=your_telegram_user_id_here
-     ```
 
-4. **Deploy**
-   - Railway will automatically deploy
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `BOT_TOKEN` | ✅ | Telegram Bot Token (from @BotFather) |
+| `ADMIN_ID` | ✅ | Your Telegram User ID |
+| `GENIUS_API_TOKEN` | ❌ | Genius API token (for lyrics) |
+
+4. **Add PostgreSQL (Optional)**
+   - Railway Dashboard → New → Database → PostgreSQL
+   - It auto-connects via `DATABASE_URL`
+
+5. **Deploy**
+   - Railway auto-deploys on push
    - Check logs for "Application started"
 
-## 🔧 Local Development
+## 🔧 Environment Variables
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/yt-bot-railway.git
-   cd yt-bot-railway
-   ```
+### Required
 
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `BOT_TOKEN` | Telegram Bot Token | `123456:ABC-DEF...` |
+| `ADMIN_ID` | Your Telegram User ID | `1902235346` |
 
-3. **Create .env_ytdl file**
-   ```
-   TELEGRAM_BOT_TOKEN_YTDL=your_token_here
-   ADMIN_ID_YTDL=your_user_id_here
-   ```
+### Optional
 
-4. **Run the bot**
-   ```bash
-   python bot.py
-   ```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GENIUS_API_TOKEN` | Genius API token for lyrics | Empty (no lyrics) |
+| `RATE_LIMIT_PER Minute` | Downloads per minute | `5` |
+| `RATE_LIMIT_PER_HOUR` | Downloads per hour | `20` |
+| `ADMIN_API_KEY` | API key for web dashboard | Auto-generated |
 
-## 📝 Environment Variables
+### Auto-Provided by Railway
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `BOT_TOKEN` | Telegram Bot Token | ✅ Yes |
-| `ADMIN_ID` | Your Telegram User ID | ✅ Yes |
-| `TELEGRAM_BOT_TOKEN_YTDL` | Alternative token variable | ❌ No |
-| `ADMIN_ID_YTDL` | Alternative admin ID variable | ❌ No |
+| Variable | Description |
+|----------|-------------|
+| `PORT` | Web server port |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `REDIS_URL` | Redis connection string |
+| `RAILWAY_PUBLIC_DOMAIN` | Public domain |
+
+## 📋 Bot Commands
+
+| Command | Description | Access |
+|---------|-------------|--------|
+| `/start` | Welcome message | All |
+| `/help` | Show help | All |
+| `/history` | Download history | All |
+| `/favorites` | Liked songs | All |
+| `/albums` | Album collection | All |
+| `/search <name>` | Search artist | All |
+| `/admin` | Admin dashboard | Admin |
+| `/adduser <id>` | Add allowed user | Admin |
+| `/removeuser <id>` | Remove user | Admin |
+| `/listusers` | List allowed users | Admin |
 
 ## 📁 Project Structure
 
 ```
 yt-bot-railway/
-├── bot.py                    # Entry point
-├── youtube_downloader_bot.py # Main bot code
-├── requirements.txt          # Python dependencies
-├── Procfile                  # Railway process type
-└── README.md                 # This file
+├── bot.py                     # Entry point
+├── youtube_downloader_bot.py  # Main bot logic (2000+ lines)
+├── config.py                  # Settings & env vars
+├── database.py                # PostgreSQL + SQLite
+├── admin_dashboard.py         # Admin inline keyboard
+├── rate_limiter.py            # 3-tier rate limiting
+├── yt_dlp_async.py            # Async yt-dlp wrapper
+├── health_check.py            # /health endpoint
+├── requirements.txt           # Dependencies
+├── railway.json               # Railway config
+├── Dockerfile                 # Docker build
+└── nixpacks.toml              # Nixpacks config
 ```
 
-## 🎯 Bot Commands
+## 🛠️ Local Development
 
-- `/start` - Show welcome message
-- `/help` - Show help
-- `/history` - Show download history
-- `/favorites` - Show liked songs
-- `/albums` - Show album collection
-- `/stats` - Show system stats (admin only)
-- `/logs` - Show recent logs (admin only)
-- `/search <name>` - Search for artist
+```bash
+git clone https://github.com/T0h1/yt-bot-railway.git
+cd yt-bot-railway
+pip install -r requirements.txt
 
-## 📝 Notes
+# Create .env or export vars
+export BOT_TOKEN="your_token"
+export ADMIN_ID="your_id"
 
-- Files are automatically deleted after upload to Telegram
-- Maximum file size: 50MB (Telegram limit)
-- Rate limiting: 5 downloads per minute per user
-- Cleanup runs every hour
+python bot.py
+```
+
+## 📊 Lyrics Sources (Priority Order)
+
+1. **lyrics.ovh** - Free API, most reliable
+2. **lyrics.fandom.com** - MediaWiki API
+3. **Genius API** (lyricsgenius) - Best for Persian/Iranian music
+4. **textylate.com** - Simple lyrics API
+
+Genius API setup:
+1. Go to https://genius.com/api-clients/new
+2. Create app → Copy "Client Access Token"
+3. Set as `GENIUS_API_TOKEN` in Railway
+
+## ⚡ Performance
+
+- **Download format**: opus > m4a > mp3 > best (highest quality first)
+- **Auto-compress**: Files >50MB compressed to fit Telegram limit
+- **Rate limit**: 2s delay between dl_all downloads (SoundCloud 403 protection)
+- **Retry**: Auto-retry on 403 errors
 
 ## 📄 License
 
@@ -115,3 +156,4 @@ MIT License
 - [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot)
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 - [mutagen](https://github.com/quodlibet/mutagen)
+- [lyricsgenius](https://github.com/johnwmillr/LyricsGenius)
