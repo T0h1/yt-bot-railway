@@ -562,6 +562,24 @@ def fetch_lyrics_sync(artist, title):
     # Remove "Feat." / "ft." variations
     title_clean = re.sub(r'\s*(feat\.|ft\.|featuring)\s*.*', '', title_clean, flags=re.IGNORECASE).strip()
     
+    # Extract just the song title from "Artist x Artist - SongTitle" format
+    # If title still contains artist names with x/&/- separators, take the last part
+    if ' - ' in title_clean:
+        parts = title_clean.split(' - ')
+        # Take the part after the LAST " - " (that's the actual song title)
+        candidate = parts[-1].strip()
+        if len(candidate) > 2:
+            title_clean = candidate
+    # Also clean: "Artist1 x Artist2 SongName" → "SongName" 
+    # If title starts with known artist name pattern
+    for sep in [' x ', ' X ', ' & ', ' × ']:
+        if sep in title_clean:
+            # Take the last segment
+            parts = title_clean.split(sep)
+            candidate = parts[-1].strip()
+            if len(candidate) > 2:
+                title_clean = candidate
+    
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json',
