@@ -11,7 +11,7 @@ if [ -n "$DATABASE_URL" ]; then
     echo "⏳ Waiting for PostgreSQL..."
     
     # Extract host and port from DATABASE_URL
-    # Format: postgresql://user:pass@host:port/dbname
+    # Format: postgresql://user:***@host:port/dbname
     PG_HOST=$(echo $DATABASE_URL | sed -E 's/.*@([^:]+):.*/\1/')
     PG_PORT=$(echo $DATABASE_URL | sed -E 's/.*:([0-9]+)\/.*/\1/')
     

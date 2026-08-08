@@ -11,9 +11,9 @@
     ]
   },
   "deploy": {
-    "startCommand": "python bot.py",
+    "startCommand": "/entrypoint.sh",
     "preDeployCommand": [
-      "python -c \"import asyncio; from database import _init_db; asyncio.run(_init_db())\""
+      "python -c \"import asyncio; from database import get_database; asyncio.run(get_database())\""
     ],
     "healthcheckPath": "/health",
     "healthcheckTimeout": 60,
