@@ -137,6 +137,7 @@ def _extract_artist_tracks_sync(url: str, max_retries: int = 3) -> Optional[Dict
         'cookiefile': cookie_file,
         'remote_components': {'ejs': 'github'},
         'impersonate': ImpersonateTarget.from_str('chrome'),
+        'extract_flat': True,
     }
     import time
     info = None
@@ -152,34 +153,34 @@ def _extract_artist_tracks_sync(url: str, max_retries: int = 3) -> Optional[Dict
             raise
     if not info:
         return None
-        entries = info.get('entries', [])
-        tracks = []
-        for i, entry in enumerate(entries):
-            if entry:
-                track_url = entry.get('url') or entry.get('webpage_url')
-                if not track_url and entry.get('id'):
-                    ie = entry.get('ie_key', '')
-                    if 'Soundcloud' in ie:
-                        track_url = f"https://soundcloud.com/{entry.get('uploader_id', '')}/{entry.get('id', '')}"
-                    elif 'Youtube' in ie:
-                        track_url = f"https://www.youtube.com/watch?v={entry.get('id', '')}"
-                    else:
-                        track_url = entry.get('id', '')
-                tracks.append({
-                    'title': entry.get('title', f'Track {i+1}'),
-                    'url': track_url,
-                    'duration': entry.get('duration', 0),
-                    'id': entry.get('id', ''),
-                    'uploader': entry.get('uploader', ''),
-                    'thumbnail': entry.get('thumbnail', ''),
-                })
-        return {
-            'title': info.get('title', 'Unknown'),
-            'thumbnail': info.get('thumbnail'),
-            'description': info.get('description', ''),
-            'uploader': info.get('uploader', ''),
-            'tracks': tracks,
-        }
+    entries = info.get('entries', [])
+    tracks = []
+    for i, entry in enumerate(entries):
+        if entry:
+            track_url = entry.get('url') or entry.get('webpage_url')
+            if not track_url and entry.get('id'):
+                ie = entry.get('ie_key', '')
+                if 'Soundcloud' in ie:
+                    track_url = f"https://soundcloud.com/{entry.get('uploader_id', '')}/{entry.get('id', '')}"
+                elif 'Youtube' in ie:
+                    track_url = f"https://www.youtube.com/watch?v={entry.get('id', '')}"
+                else:
+                    track_url = entry.get('id', '')
+            tracks.append({
+                'title': entry.get('title', f'Track {i+1}'),
+                'url': track_url,
+                'duration': entry.get('duration', 0),
+                'id': entry.get('id', ''),
+                'uploader': entry.get('uploader', ''),
+                'thumbnail': entry.get('thumbnail', ''),
+            })
+    return {
+        'title': info.get('title', 'Unknown'),
+        'thumbnail': info.get('thumbnail'),
+        'description': info.get('description', ''),
+        'uploader': info.get('uploader', ''),
+        'tracks': tracks,
+    }
 
 
 def _search_sync(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
