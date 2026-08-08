@@ -147,12 +147,17 @@ class Database:
                     daily_limit INTEGER DEFAULT 50,
                     total_downloads INTEGER DEFAULT 0,
                     last_download_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_allowed_users_active
                 ON allowed_users(is_active)
+            """)
+            # Add updated_at column if missing (for existing tables)
+            await conn.execute("""
+                ALTER TABLE allowed_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
             """)
 
     async def add_download_history(
