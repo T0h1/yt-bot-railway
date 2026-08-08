@@ -1537,8 +1537,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== COMMANDS ====================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if ADMIN_ID and update.effective_user.id != ADMIN_ID:
-        return
     await update.message.reply_text(
         "🎶 **ربات دانلود مدیا v2.0**\n\n"
         "لینک بفرست از هر پلتفرمی:\n\n"
@@ -1562,8 +1560,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if ADMIN_ID and update.effective_user.id != ADMIN_ID:
-        return
     await update.message.reply_text(
         "📖 **راهنمای ربات:**\n\n"
         "**دانلود آهنگ:**\n"
