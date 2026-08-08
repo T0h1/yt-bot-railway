@@ -47,7 +47,9 @@ class MemoryRateLimiter(RateLimiter):
             return max(0, limit - len(self._store[user_id]))
 
     async def check_daily(self, user_id: int, limit: int = 50) -> tuple[bool, int]:
-        """Check daily quota. Returns (allowed, remaining)."""
+        """Check daily quota. 0 = unlimited. Returns (allowed, remaining)."""
+        if limit <= 0:
+            return True, 999999
         async with self._lock:
             now = time.time()
             day_start = now - 86400
@@ -102,7 +104,9 @@ class RedisRateLimiter(RateLimiter):
             return limit
 
     async def check_daily(self, user_id: int, limit: int = 50) -> tuple[bool, int]:
-        """Check daily quota via Redis. Returns (allowed, remaining)."""
+        """Check daily quota via Redis. 0 = unlimited."""
+        if limit <= 0:
+            return True, 999999
         try:
             r = await self._get_redis()
             today = time.strftime("%Y-%m-%d")
