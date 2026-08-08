@@ -4,13 +4,14 @@ Replaces the need for Railway native cron (which requires process to exit).
 """
 
 import asyncio
-import logging
 from datetime import time as dt_time
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-logger = logging.getLogger("mediabot.scheduler")
+from logging_config import get_logger
+
+logger = get_logger("mediabot.scheduler")
 
 # Global scheduler instance
 _scheduler = None
