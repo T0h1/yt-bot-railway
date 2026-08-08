@@ -46,7 +46,6 @@ Thumbs.db
 railway.json
 nixpacks.toml
 Dockerfile
-entrypoint.sh
 .railwayignore
 
 # Data directories (will be created at runtime)
