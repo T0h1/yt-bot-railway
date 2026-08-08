@@ -7,7 +7,7 @@ from typing import Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from config import settings, ADMIN_ID, RATE_LIMIT_PER_MINUTE, RATE_LIMIT_PER_HOUR, MAX_DOWNLOADS_PER_USER_PER_DAY
+from config import settings, ADMIN_ID, RATE_LIMIT_PER_MINUTE, RATE_LIMIT_PER_HOUR, MAX_DOWNLOADS_PER_USER_PER_DAY, ALLOWED_USERS
 from logging_config import get_logger
 from database import get_database
 from download_queue import get_download_queue
@@ -50,7 +50,16 @@ async def admin_cb_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await q.answer()
     db = await get_database()
     if not db:
-        await q.edit_message_text("❌ دیتابیس فعال نیست.")
+        users_str = ", ".join(str(u) for u in ALLOWED_USERS) if ALLOWED_USERS else "همه (محدودیتی نیست)"
+        text = (
+            "📊 **آمار کلی ربات** (حالت ساده)\n\n"
+            f"👥 کاربران مجاز: `{users_str}`\n"
+            f"📦 صف: ناموجود (Redis)\n"
+            f"📋 لاگ: ناموجود (PostgreSQL)\n\n"
+            "_برای آمار کامل، PostgreSQL را تنظیم کنید._"
+        )
+        kb = [[InlineKeyboardButton("🔙 بازگشت", callback_data="admin_cb_main_menu")]]
+        await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
         return
     stats = await db.get_bot_stats()
     queue = await get_download_queue()
@@ -77,7 +86,15 @@ async def admin_cb_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await q.answer()
     db = await get_database()
     if not db:
-        await q.edit_message_text("❌ دیتابیس فعال نیست.")
+        if ALLOWED_USERS:
+            lines = ["👥 **کاربران مجاز (از ALLOWED_USERS):**\n"]
+            for uid in ALLOWED_USERS:
+                lines.append(f"✅ ID: `{uid}`")
+            lines.append(f"\n_برای مدیریت کامل، PostgreSQL را تنظیم کنید._")
+        else:
+            lines = ["👥 **کاربران مجاز:**\n\nℹ️ `ALLOWED_USERS` خالی است — همه کاربران مجازند.\n\n_برای محدود کردن، IDها را در Railway اضافه کنید._"]
+        kb = [[InlineKeyboardButton("🔙 بازگشت", callback_data="admin_cb_main_menu")]]
+        await q.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
         return
     users = await db.get_allowed_users()
     if not users:
@@ -108,7 +125,7 @@ async def admin_cb_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await q.answer()
     db = await get_database()
     if not db:
-        await q.edit_message_text("❌ دیتابیس فعال نیست.")
+        await q.edit_message_text("📋 **لاگ دانلودها**\n\n⚠️ برای نمایش لاگ، PostgreSQL را تنظیم کنید.")
         return
     logs = await db.get_download_history(limit=10)
     if not logs:
@@ -182,7 +199,7 @@ async def handle_admin_broadcast(update: Update, context: ContextTypes.DEFAULT_T
     text = update.message.text
     db = await get_database()
     if not db:
-        await update.message.reply_text("❌ دیتابیس فعال نیست.")
+        await update.message.reply_text("📢 **پیام همگانی**\n\n⚠️ برای ارسال همگانی، PostgreSQL را تنظیم کنید.")
         return True
     user_ids = await db.get_all_user_ids()
     sent = failed = 0
@@ -280,7 +297,7 @@ async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     db = await get_database()
     if not db:
-        await update.message.reply_text("❌ دیتابیس فعال نیست.")
+        await update.message.reply_text("➕ **افزودن کاربر**\n\n⚠️ برای مدیریت کاربران از طریق ربات، PostgreSQL را تنظیم کنید.\n\n💡 یا ID کاربر را به `ALLOWED_USERS` در Railway اضافه کنید.")
         return
 
     target_id = None
@@ -335,7 +352,7 @@ async def cmd_removeuser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     db = await get_database()
     if not db:
-        await update.message.reply_text("❌ دیتابیس فعال نیست.")
+        await update.message.reply_text("➖ **حذف کاربر**\n\n⚠️ برای حذف کاربر، PostgreSQL را تنظیم کنید.\n\n💡 یا ID کاربر را از `ALLOWED_USERS` در Railway حذف کنید.")
         return
     if not context.args:
         await update.message.reply_text("❌ `/removeuser 123456789`", parse_mode="Markdown")
@@ -358,7 +375,13 @@ async def cmd_listusers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     db = await get_database()
     if not db:
-        await update.message.reply_text("❌ دیتابیس فعال نیست.")
+        if ALLOWED_USERS:
+            lines = ["👥 **کاربران مجاز (از Railway):**\n"]
+            for uid in ALLOWED_USERS:
+                lines.append(f"✅ ID: `{uid}`")
+        else:
+            lines = ["👥 **کاربران مجاز:**\n\nℹ️ `ALLOWED_USERS` خالی است — همه کاربران مجازند."]
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
         return
     users = await db.get_allowed_users()
     if not users:
@@ -378,7 +401,7 @@ async def cmd_toggleuser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     db = await get_database()
     if not db:
-        await update.message.reply_text("❌ دیتابیس فعال نیست.")
+        await update.message.reply_text("🔄 **مسدود/فعال کردن**\n\n⚠️ برای تغییر وضعیت کاربر، PostgreSQL را تنظیم کنید.")
         return
     if not context.args:
         await update.message.reply_text("❌ `/toggleuser 123456789`", parse_mode="Markdown")
@@ -405,7 +428,7 @@ async def cmd_userinfo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     db = await get_database()
     if not db:
-        await update.message.reply_text("❌ دیتابیس فعال نیست.")
+        await update.message.reply_text("📊 **جزئیات کاربر**\n\n⚠️ برای نمایش جزئیات، PostgreSQL را تنظیم کنید.")
         return
     if not context.args:
         await update.message.reply_text("❌ `/userinfo 123456789`", parse_mode="Markdown")
