@@ -131,3 +131,4 @@ restartPolicyMaxRetries: 10
 | Bot (Hobby) | $5/mo |
 
 > 💡 با credit رایگان $5، ربات + PostgreSQL رایگان اجرا میشه!
+# Deploy trigger Sat Aug  8 03:47:25 UTC 2026
