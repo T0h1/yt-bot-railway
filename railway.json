@@ -12,9 +12,6 @@
   },
   "deploy": {
     "startCommand": "/entrypoint.sh",
-    "preDeployCommand": [
-      "python -c \"import asyncio; from database import get_database; asyncio.run(get_database())\""
-    ],
     "healthcheckPath": "/health",
     "healthcheckTimeout": 60,
     "restartPolicyType": "ALWAYS",
