@@ -41,7 +41,7 @@ async def start_scheduler():
     _register_jobs(scheduled_cleanup, get_database)
     
     _scheduler.start()
-    logger.info("scheduler_started", jobs=len(_scheduler.get_jobs()))
+    logger.info("scheduler_started", job_count=len(_scheduler.get_jobs()))
 
 
 async def stop_scheduler():
