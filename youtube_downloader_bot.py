@@ -1975,14 +1975,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if handled:
             return
     
-    # Check if user is allowed
-    # First check DB-based allowlist (if PostgreSQL configured)
+    # Check if user is allowed (env var OR DB — either one grants access)
+    allowed = False
     db = await get_database()
-    if db:
-        if not await db.is_user_allowed(user_id):
-            await update.message.reply_text("❌ شما اجازه استفاده از ربات را ندارید.")
-            return
-    elif ALLOWED_USERS and user_id not in ALLOWED_USERS:
+    # 1) Check ALLOWED_USERS env var first
+    if not ALLOWED_USERS or user_id in ALLOWED_USERS:
+        allowed = True
+    # 2) If not in env var, check DB
+    if not allowed and db:
+        allowed = await db.is_user_allowed(user_id)
+    if not allowed:
         await update.message.reply_text("❌ شما اجازه استفاده از ربات را ندارید.")
         return
 
