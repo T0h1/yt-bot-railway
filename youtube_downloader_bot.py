@@ -606,11 +606,20 @@ def fetch_lyrics_sync(artist, title):
         'Accept': 'application/json',
     }
     
-    # Two-pass search: first with main_artist + title, then title only
+    # Multiple search strategies for better Persian music coverage
     search_combos = [
         (main_artist_clean, title_clean, f"{main_artist_clean} + {title_clean}"),
         (title_clean, '', f"{title_clean} (title only)"),
     ]
+    
+    # Add Persian variations if text contains Persian characters
+    has_persian = bool(re.search(r'[\u0600-\u06FF]', artist + title))
+    if has_persian:
+        # Try to get Persian equivalents (basic transliteration detection)
+        # For now, just add common variations
+        search_combos.extend([
+            (artist_clean, title_clean, f"{artist_clean} + {title_clean} (full artist)"),
+        ])
     
     global _genius_metadata
     _genius_metadata = {'album': None, 'year': None}
@@ -621,33 +630,49 @@ def fetch_lyrics_sync(artist, title):
         # Source 1: Genius API (FIRST - best for Persian music + album/year metadata)
         if genius_client:
             try:
+                # Use search_song which properly scrapes lyrics from Genius
                 song = genius_client.search_song(
                     search_title if search_title else search_artist,
                     search_artist if search_title else ''
                 )
                 if song and song.lyrics:
-                    lyrics = song.lyrics
-                    # Clean Genius lyrics header
-                    lyrics = re.sub(r'^\[متن آهنگ.*?\]\s*', '', lyrics).strip()
-                    lyrics = re.sub(r'^\d+\s*Embed\s*', '', lyrics).strip()
-                    lyrics = re.sub(r'\d+\s*Embed\s*$', '', lyrics).strip()
-                    lyrics = re.sub(r'^\d+\s*', '', lyrics).strip()
+                    # Verify the song matches our search (basic check)
+                    song_artist = (song.artist or '').lower()
+                    song_title = (song.title or '').lower()
+                    search_artist_l = search_artist.lower()
+                    search_title_l = search_title.lower()
                     
-                    # Extract album info
-                    album_info = song.album
-                    if isinstance(album_info, dict) and album_info.get('name'):
-                        album_name = album_info['name']
-                        # Filter out junk album names
-                        junk_albums = {'telegram', 'youtube', 'soundcloud', 'instagram', 'spotify', 'apple music', 'music'}
-                        if album_name.lower() not in junk_albums:
-                            _genius_metadata['album'] = album_name
-                            logger.info(f"Genius album: {album_name}")
-                    if isinstance(album_info, dict) and album_info.get('release_date_for_display'):
-                        _genius_metadata['year'] = album_info['release_date_for_display']
+                    # For Persian, be more lenient; for English, require some match
+                    if search_artist_l and search_title_l:
+                        artist_match = search_artist_l in song_artist or song_artist in search_artist_l
+                        title_match = search_title_l in song_title or song_title in search_title_l
+                        if not (artist_match or title_match):
+                            logger.info(f"Genius returned wrong song: {song.artist} - {song.title}, skipping")
+                            song = None
                     
-                    if len(lyrics) > 20:
-                        logger.info(f"Lyrics found from Genius API: {len(lyrics)} chars")
-                        return lyrics[:4000]
+                    if song:
+                        lyrics = song.lyrics
+                        # Clean Genius lyrics header
+                        lyrics = re.sub(r'^\[متن آهنگ.*?\]\s*', '', lyrics).strip()
+                        lyrics = re.sub(r'^\d+\s*Embed\s*', '', lyrics).strip()
+                        lyrics = re.sub(r'\d+\s*Embed\s*$', '', lyrics).strip()
+                        lyrics = re.sub(r'^\d+\s*', '', lyrics).strip()
+                        
+                        # Extract album info
+                        album_info = song.album
+                        if isinstance(album_info, dict) and album_info.get('name'):
+                            album_name = album_info['name']
+                            # Filter out junk album names
+                            junk_albums = {'telegram', 'youtube', 'soundcloud', 'instagram', 'spotify', 'apple music', 'music'}
+                            if album_name.lower() not in junk_albums:
+                                _genius_metadata['album'] = album_name
+                                logger.info(f"Genius album: {album_name}")
+                        if isinstance(album_info, dict) and album_info.get('release_date_for_display'):
+                            _genius_metadata['year'] = album_info['release_date_for_display']
+                        
+                        if len(lyrics) > 20:
+                            logger.info(f"Lyrics found from Genius API: {len(lyrics)} chars")
+                            return lyrics[:4000]
             except Exception as e:
                 logger.info(f"Genius API failed: {e}")
         
