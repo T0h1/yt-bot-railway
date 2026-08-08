@@ -689,7 +689,8 @@ async def download_audio(url, chat_id, context, title_override=None, progress_ms
         def do_download():
             ydl_opts = {
                 'outtmpl': str(DOWNLOAD_DIR / 'temp_audio.%(ext)s'),
-                'format': 'bestaudio/best',
+                'format': 'bestaudio[ext=opus]/bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best',
+                'postprocessors': [],
                 'quiet': True, 'noplaylist': True,
                 'cookiefile': str(COOKIE_FILE) if COOKIE_FILE.exists() else None,
                 'progress_hooks': [],
